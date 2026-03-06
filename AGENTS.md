@@ -58,6 +58,18 @@ See [docs/testing.md](docs/testing.md) for fixture architecture, markers, covera
 - If test data changes: update YAML files in `tests/fixtures/`, not inline dicts
 - Example configs in `examples/` should validate against the schema
 
+## Worktrunk (worktree cleanup)
+
+**CRITICAL**: Before running `wt remove`, you MUST first change your working directory to the main repo:
+
+```bash
+cd dokploy_seed && wt remove <name>
+```
+
+If you skip this, `wt remove` deletes your CWD and **every subsequent Bash call will fail irrecoverably**. There is no way to fix a broken CWD in a Claude Code session — the entire session is bricked.
+
+Shell integration (`wt` as a shell function) does NOT help here because each Bash tool call is an independent shell — the `cd` side-effect cannot persist.
+
 ## Context7
 
 Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
@@ -67,6 +79,7 @@ Always use Context7 MCP when I need library/API documentation, code generation, 
 - dokploy/website
 - hypothesisworks/hypothesis
 - jdx/mise
+- max-sixty/worktrunk
 - mrlesk/backlog.md
 - websites/taskfile_dev
 

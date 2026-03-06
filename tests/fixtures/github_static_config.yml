@@ -1,0 +1,38 @@
+# Config for a GitHub-sourced static site with all new fields.
+# Based on the fuck47 prod project.
+
+project:
+  name: my-static-site
+  description: "Static site deployment\n"
+  deploy_order:
+    - - app
+
+github:
+  owner: pythoninthegrass
+  repository: fuck47
+  branch: main
+
+environments:
+  prod:
+    apps:
+      app:
+        domain:
+          host: dev.fuckfortyseven.org
+          port: 80
+          https: true
+          certificateType: letsencrypt
+          path: /docs
+          internalPath: /
+          stripPath: false
+        autoDeploy: true
+        replicas: 2
+
+apps:
+  - name: app
+    source: github
+    buildType: static
+    publishDirectory: dist
+    buildPath: /
+    triggerType: push
+    autoDeploy: false
+    replicas: 1

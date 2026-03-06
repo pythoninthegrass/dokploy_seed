@@ -164,6 +164,66 @@ def filter_env(content: str, exclude_prefixes: list[str]) -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 
+def build_github_provider_payload(
+    app_id: str, app_def: dict, github_cfg: dict, github_id: str
+) -> dict:
+    """Build payload for application.saveGithubProvider."""
+    return {
+        "applicationId": app_id,
+        "repository": github_cfg["repository"],
+        "branch": github_cfg["branch"],
+        "owner": github_cfg["owner"],
+        "buildPath": app_def.get("buildPath", "/"),
+        "githubId": github_id,
+        "enableSubmodules": False,
+        "triggerType": app_def.get("triggerType", "push"),
+        "watchPaths": app_def.get("watchPaths"),
+    }
+
+
+def build_build_type_payload(app_id: str, app_def: dict) -> dict:
+    """Build payload for application.saveBuildType."""
+    build_type = app_def.get("buildType", "dockerfile")
+    payload: dict = {
+        "applicationId": app_id,
+        "buildType": build_type,
+    }
+    if build_type == "dockerfile":
+        payload["dockerfile"] = app_def.get("dockerfile", "Dockerfile")
+        payload["dockerContextPath"] = app_def.get("dockerContextPath", "")
+        payload["dockerBuildStage"] = app_def.get("dockerBuildStage", "")
+    elif build_type == "static":
+        payload["publishDirectory"] = app_def.get("publishDirectory", "")
+    return payload
+
+
+def build_domain_payload(app_id: str, dom: dict) -> dict:
+    """Build payload for domain.create."""
+    payload = {
+        "applicationId": app_id,
+        "host": dom["host"],
+        "port": dom["port"],
+        "https": dom["https"],
+        "certificateType": dom["certificateType"],
+    }
+    for key in ("path", "internalPath", "stripPath"):
+        if key in dom:
+            payload[key] = dom[key]
+    return payload
+
+
+def build_app_settings_payload(app_id: str, app_def: dict) -> dict | None:
+    """Build payload for application.update (autoDeploy, replicas).
+
+    Returns None if no settings need updating.
+    """
+    payload: dict = {"applicationId": app_id}
+    for key in ("autoDeploy", "replicas"):
+        if key in app_def:
+            payload[key] = app_def[key]
+    return payload if len(payload) > 1 else None
+
+
 class DokployClient:
     """Thin httpx wrapper for Dokploy API."""
 
@@ -395,31 +455,15 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
         elif app_def["source"] == "github":
             assert github_cfg is not None
             print(f"Configuring GitHub provider for {name}...")
-            client.post(
-                "application.saveGithubProvider",
-                {
-                    "applicationId": app_id,
-                    "repository": github_cfg["repository"],
-                    "branch": github_cfg["branch"],
-                    "owner": github_cfg["owner"],
-                    "buildPath": "/",
-                    "githubId": github_id,
-                    "enableSubmodules": False,
-                    "triggerType": "push",
-                    "watchPaths": None,
-                },
+            provider_payload = build_github_provider_payload(
+                app_id, app_def, github_cfg, github_id
             )
-            print(f"  Setting buildType=dockerfile for {name}...")
-            client.post(
-                "application.saveBuildType",
-                {
-                    "applicationId": app_id,
-                    "buildType": "dockerfile",
-                    "dockerfile": "Dockerfile",
-                    "dockerContextPath": "",
-                    "dockerBuildStage": "",
-                },
-            )
+            client.post("application.saveGithubProvider", provider_payload)
+
+            build_type = app_def.get("buildType", "dockerfile")
+            print(f"  Setting buildType={build_type} for {name}...")
+            build_payload = build_build_type_payload(app_id, app_def)
+            client.post("application.saveBuildType", build_payload)
 
     # 5. Command overrides (resolve {ref} placeholders)
     for app_def in cfg["apps"]:
@@ -447,18 +491,19 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
         app_id = state["apps"][name]["applicationId"]
         for dom in domains:
             print(f"Creating domain for {name}: {dom['host']}...")
-            client.post(
-                "domain.create",
-                {
-                    "applicationId": app_id,
-                    "host": dom["host"],
-                    "port": dom["port"],
-                    "https": dom["https"],
-                    "certificateType": dom["certificateType"],
-                },
-            )
+            domain_payload = build_domain_payload(app_id, dom)
+            client.post("domain.create", domain_payload)
 
-    # 7. Save state
+    # 7. Application settings (autoDeploy, replicas)
+    for app_def in cfg["apps"]:
+        name = app_def["name"]
+        app_id = state["apps"][name]["applicationId"]
+        settings_payload = build_app_settings_payload(app_id, app_def)
+        if settings_payload:
+            print(f"Updating app settings for {name}...")
+            client.post("application.update", settings_payload)
+
+    # 8. Save state
     save_state(state, state_file)
     print("\nSetup complete!")
     print(f"  Project: {project_id}")

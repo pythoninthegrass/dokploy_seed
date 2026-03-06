@@ -1,10 +1,10 @@
 ---
 id: TASK-001.03
 title: E2E tests against real Dokploy instance (Docker-in-Docker)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-03-06 08:13'
-updated_date: '2026-03-06 08:16'
+updated_date: '2026-03-06 15:34'
 labels:
   - testing
   - e2e
@@ -21,7 +21,7 @@ documentation:
   - 'https://docs.dokploy.com'
 parent_task_id: TASK-001
 priority: medium
-ordinal: 2000
+ordinal: 1875
 ---
 
 ## Description

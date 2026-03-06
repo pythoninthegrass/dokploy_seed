@@ -1,0 +1,39 @@
+# Config for a GitHub-sourced dockerfile app with all new fields.
+# Based on the popurls prod project.
+
+project:
+  name: popurls
+  description: "Glance dashboard\n"
+  env_targets: [app]
+  deploy_order:
+    - - app
+
+github:
+  owner: pythoninthegrass
+  repository: glance
+  branch: main
+
+environments:
+  prod:
+    apps:
+      app:
+        domain:
+          host: popurls.xyz
+          port: 8080
+          https: true
+          certificateType: letsencrypt
+
+apps:
+  - name: app
+    source: github
+    buildType: dockerfile
+    dockerfile: Dockerfile
+    buildPath: /
+    triggerType: push
+    autoDeploy: true
+    replicas: 1
+    watchPaths:
+      - "config/**"
+      - "assets/**"
+      - Dockerfile
+      - "^(?!.*\\.md$).*$"

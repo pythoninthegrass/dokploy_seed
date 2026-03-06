@@ -14,9 +14,6 @@ dokploy = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dokploy)
 
 
-# ---------------------------------------------------------------------------
-# 1. find_repo_root
-# ---------------------------------------------------------------------------
 class TestFindRepoRoot:
     def test_finds_repo_root(self, tmp_path, monkeypatch):
         """find_repo_root walks up and returns the dir containing dokploy.yml."""
@@ -34,9 +31,6 @@ class TestFindRepoRoot:
             dokploy.find_repo_root()
 
 
-# ---------------------------------------------------------------------------
-# 2. load_config
-# ---------------------------------------------------------------------------
 class TestLoadConfig:
     def test_loads_valid_yaml(self, tmp_path, minimal_config):
         cfg_file = tmp_path / "dokploy.yml"
@@ -49,9 +43,6 @@ class TestLoadConfig:
             dokploy.load_config(tmp_path)
 
 
-# ---------------------------------------------------------------------------
-# 3. validate_config
-# ---------------------------------------------------------------------------
 class TestValidateConfig:
     def test_valid_config_passes(self, web_app_config):
         # Should not raise
@@ -84,9 +75,6 @@ class TestValidateConfig:
         dokploy.validate_config(minimal_config)
 
 
-# ---------------------------------------------------------------------------
-# 4. validate_env_references
-# ---------------------------------------------------------------------------
 class TestValidateEnvReferences:
     def test_valid_refs_pass(self, web_app_config):
         dokploy.validate_env_references(web_app_config)
@@ -103,9 +91,6 @@ class TestValidateEnvReferences:
         dokploy.validate_env_references(minimal_config)
 
 
-# ---------------------------------------------------------------------------
-# 5. merge_env_overrides
-# ---------------------------------------------------------------------------
 class TestMergeEnvOverrides:
     def test_github_overrides_merge(self, web_app_config):
         merged = dokploy.merge_env_overrides(web_app_config, "dev")
@@ -131,9 +116,6 @@ class TestMergeEnvOverrides:
         assert web_app_config == original
 
 
-# ---------------------------------------------------------------------------
-# 6. resolve_refs
-# ---------------------------------------------------------------------------
 class TestResolveRefs:
     def test_single_ref(self, sample_state):
         result = dokploy.resolve_refs("redis://{redis}:6379/0", sample_state)
@@ -152,9 +134,6 @@ class TestResolveRefs:
         assert result == "plain string"
 
 
-# ---------------------------------------------------------------------------
-# 7. get_env_exclude_prefixes
-# ---------------------------------------------------------------------------
 class TestGetEnvExcludePrefixes:
     def test_defaults_only(self, monkeypatch):
         monkeypatch.delenv("ENV_EXCLUDE_PREFIXES", raising=False)
@@ -176,9 +155,6 @@ class TestGetEnvExcludePrefixes:
         assert prefixes == dokploy.DEFAULT_ENV_EXCLUDE_PREFIXES
 
 
-# ---------------------------------------------------------------------------
-# 8. filter_env
-# ---------------------------------------------------------------------------
 class TestFilterEnv:
     def test_comments_removed(self):
         content = "# comment\nFOO=bar\n"
@@ -213,9 +189,6 @@ class TestFilterEnv:
         assert result == ""
 
 
-# ---------------------------------------------------------------------------
-# 9. load_state / save_state
-# ---------------------------------------------------------------------------
 class TestLoadSaveState:
     def test_round_trip(self, tmp_path, sample_state):
         state_file = tmp_path / ".dokploy-state" / "test.json"
@@ -234,9 +207,6 @@ class TestLoadSaveState:
         assert json.loads(state_file.read_text()) == sample_state
 
 
-# ---------------------------------------------------------------------------
-# 10. main() argparse
-# ---------------------------------------------------------------------------
 class TestArgparse:
     def test_valid_commands(self):
         for cmd in ["check", "setup", "env", "deploy", "status", "destroy"]:
@@ -272,10 +242,241 @@ class TestArgparse:
         assert parsed.command == "deploy"
 
 
-# ---------------------------------------------------------------------------
-# get_state_file (bonus — simple but worth a quick check)
-# ---------------------------------------------------------------------------
 class TestGetStateFile:
     def test_returns_correct_path(self, tmp_path):
         result = dokploy.get_state_file(tmp_path, "prod")
         assert result == tmp_path / ".dokploy-state" / "prod.json"
+
+
+class TestBuildGithubProviderPayload:
+    def test_defaults(self):
+        """Minimal app_def produces default buildPath, triggerType, watchPaths."""
+        result = dokploy.build_github_provider_payload(
+            "app-1",
+            {"name": "web", "source": "github"},
+            {"owner": "org", "repository": "repo", "branch": "main"},
+            "gh-123",
+        )
+        assert result == {
+            "applicationId": "app-1",
+            "repository": "repo",
+            "branch": "main",
+            "owner": "org",
+            "buildPath": "/",
+            "githubId": "gh-123",
+            "enableSubmodules": False,
+            "triggerType": "push",
+            "watchPaths": None,
+        }
+
+    def test_custom_values(self):
+        """Per-app overrides for buildPath, triggerType, watchPaths are passed through."""
+        app_def = {
+            "name": "web",
+            "source": "github",
+            "buildPath": "/app",
+            "triggerType": "manual",
+            "watchPaths": ["src/**", "Dockerfile"],
+        }
+        result = dokploy.build_github_provider_payload(
+            "app-1",
+            app_def,
+            {"owner": "org", "repository": "repo", "branch": "main"},
+            "gh-123",
+        )
+        assert result["buildPath"] == "/app"
+        assert result["triggerType"] == "manual"
+        assert result["watchPaths"] == ["src/**", "Dockerfile"]
+
+
+class TestBuildBuildTypePayload:
+    def test_default_dockerfile(self):
+        """No buildType defaults to dockerfile with Dockerfile defaults."""
+        result = dokploy.build_build_type_payload("app-1", {"name": "web"})
+        assert result == {
+            "applicationId": "app-1",
+            "buildType": "dockerfile",
+            "dockerfile": "Dockerfile",
+            "dockerContextPath": "",
+            "dockerBuildStage": "",
+        }
+
+    def test_explicit_dockerfile(self):
+        """Explicit dockerfile settings are passed through."""
+        app_def = {
+            "name": "web",
+            "buildType": "dockerfile",
+            "dockerfile": "docker/Dockerfile.prod",
+            "dockerContextPath": ".",
+            "dockerBuildStage": "production",
+        }
+        result = dokploy.build_build_type_payload("app-1", app_def)
+        assert result["dockerfile"] == "docker/Dockerfile.prod"
+        assert result["dockerContextPath"] == "."
+        assert result["dockerBuildStage"] == "production"
+
+    def test_static_build_type(self):
+        """Static buildType includes publishDirectory, no dockerfile fields."""
+        app_def = {
+            "name": "site",
+            "buildType": "static",
+            "publishDirectory": "dist",
+        }
+        result = dokploy.build_build_type_payload("app-1", app_def)
+        assert result == {
+            "applicationId": "app-1",
+            "buildType": "static",
+            "publishDirectory": "dist",
+        }
+        assert "dockerfile" not in result
+
+    def test_static_default_publish_directory(self):
+        """Static buildType without publishDirectory defaults to empty string."""
+        result = dokploy.build_build_type_payload(
+            "app-1", {"name": "site", "buildType": "static"}
+        )
+        assert result["publishDirectory"] == ""
+
+    def test_nixpacks_build_type(self):
+        """Nixpacks buildType has no extra fields."""
+        result = dokploy.build_build_type_payload(
+            "app-1", {"name": "app", "buildType": "nixpacks"}
+        )
+        assert result == {
+            "applicationId": "app-1",
+            "buildType": "nixpacks",
+        }
+
+
+class TestBuildDomainPayload:
+    def test_required_fields_only(self):
+        """Minimal domain with only required fields."""
+        dom = {
+            "host": "example.com",
+            "port": 8080,
+            "https": True,
+            "certificateType": "letsencrypt",
+        }
+        result = dokploy.build_domain_payload("app-1", dom)
+        assert result == {
+            "applicationId": "app-1",
+            "host": "example.com",
+            "port": 8080,
+            "https": True,
+            "certificateType": "letsencrypt",
+        }
+        assert "path" not in result
+        assert "internalPath" not in result
+        assert "stripPath" not in result
+
+    def test_with_path(self):
+        """Domain with path field is included in payload."""
+        dom = {
+            "host": "example.com",
+            "port": 80,
+            "https": True,
+            "certificateType": "letsencrypt",
+            "path": "/docs",
+        }
+        result = dokploy.build_domain_payload("app-1", dom)
+        assert result["path"] == "/docs"
+
+    def test_all_optional_fields(self):
+        """All optional domain fields (path, internalPath, stripPath) included."""
+        dom = {
+            "host": "example.com",
+            "port": 80,
+            "https": True,
+            "certificateType": "letsencrypt",
+            "path": "/api",
+            "internalPath": "/v2",
+            "stripPath": True,
+        }
+        result = dokploy.build_domain_payload("app-1", dom)
+        assert result["path"] == "/api"
+        assert result["internalPath"] == "/v2"
+        assert result["stripPath"] is True
+
+
+class TestBuildAppSettingsPayload:
+    def test_no_settings_returns_none(self):
+        """App with no autoDeploy/replicas returns None."""
+        result = dokploy.build_app_settings_payload("app-1", {"name": "web"})
+        assert result is None
+
+    def test_auto_deploy_only(self):
+        """Only autoDeploy set."""
+        result = dokploy.build_app_settings_payload(
+            "app-1", {"name": "web", "autoDeploy": True}
+        )
+        assert result == {"applicationId": "app-1", "autoDeploy": True}
+
+    def test_replicas_only(self):
+        """Only replicas set."""
+        result = dokploy.build_app_settings_payload(
+            "app-1", {"name": "web", "replicas": 3}
+        )
+        assert result == {"applicationId": "app-1", "replicas": 3}
+
+    def test_both_settings(self):
+        """Both autoDeploy and replicas set."""
+        result = dokploy.build_app_settings_payload(
+            "app-1", {"name": "web", "autoDeploy": False, "replicas": 2}
+        )
+        assert result == {
+            "applicationId": "app-1",
+            "autoDeploy": False,
+            "replicas": 2,
+        }
+
+    def test_auto_deploy_false_is_included(self):
+        """autoDeploy=False is explicitly included (not treated as falsy)."""
+        result = dokploy.build_app_settings_payload(
+            "app-1", {"name": "web", "autoDeploy": False}
+        )
+        assert result is not None
+        assert result["autoDeploy"] is False
+
+
+class TestMergeEnvOverridesNewFields:
+    def test_build_type_override_merges(self, github_static_config):
+        """Environment override for autoDeploy/replicas merges into app."""
+        merged = dokploy.merge_env_overrides(github_static_config, "prod")
+        app = next(a for a in merged["apps"] if a["name"] == "app")
+        # Base has autoDeploy=False, prod override has autoDeploy=True
+        assert app["autoDeploy"] is True
+        # Base has replicas=1, prod override has replicas=2
+        assert app["replicas"] == 2
+
+    def test_domain_path_in_override(self, github_static_config):
+        """Environment domain override with path/internalPath/stripPath merges."""
+        merged = dokploy.merge_env_overrides(github_static_config, "prod")
+        app = next(a for a in merged["apps"] if a["name"] == "app")
+        assert app["domain"]["path"] == "/docs"
+        assert app["domain"]["internalPath"] == "/"
+        assert app["domain"]["stripPath"] is False
+
+    def test_base_build_type_preserved(self, github_static_config):
+        """buildType from base config is preserved when not overridden."""
+        merged = dokploy.merge_env_overrides(github_static_config, "prod")
+        app = next(a for a in merged["apps"] if a["name"] == "app")
+        assert app["buildType"] == "static"
+
+    def test_watch_paths_in_config(self, github_dockerfile_config):
+        """watchPaths from base config are preserved through merge."""
+        merged = dokploy.merge_env_overrides(github_dockerfile_config, "prod")
+        app = next(a for a in merged["apps"] if a["name"] == "app")
+        assert app["watchPaths"] == [
+            "config/**",
+            "assets/**",
+            "Dockerfile",
+            "^(?!.*\\.md$).*$",
+        ]
+
+
+class TestValidateConfigNewFixtures:
+    def test_static_config_valid(self, github_static_config):
+        dokploy.validate_config(github_static_config)
+
+    def test_dockerfile_config_valid(self, github_dockerfile_config):
+        dokploy.validate_config(github_dockerfile_config)

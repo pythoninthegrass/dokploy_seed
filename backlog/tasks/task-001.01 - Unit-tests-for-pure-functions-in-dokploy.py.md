@@ -1,10 +1,10 @@
 ---
 id: TASK-001.01
 title: Unit tests for pure functions in dokploy.py
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-06 08:13'
-updated_date: '2026-03-06 08:14'
+updated_date: '2026-03-06 08:25'
 labels:
   - testing
   - unit-tests
@@ -65,9 +65,22 @@ Write pytest unit tests for all pure/near-pure functions in `dokploy.py`. These 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every pure function listed above has at least one positive and one negative test case
-- [ ] #2 Tests use tmp_path for filesystem isolation (no side effects)
-- [ ] #3 Tests for sys.exit paths use pytest.raises(SystemExit)
-- [ ] #4 All tests pass with `uv run pytest tests/test_unit.py`
-- [ ] #5 conftest.py provides reusable fixtures for sample configs and state dicts
+- [x] #1 Every pure function listed above has at least one positive and one negative test case
+- [x] #2 Tests use tmp_path for filesystem isolation (no side effects)
+- [x] #3 Tests for sys.exit paths use pytest.raises(SystemExit)
+- [x] #4 All tests pass with `uv run pytest tests/test_unit.py`
+- [x] #5 conftest.py provides reusable fixtures for sample configs and state dicts
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Implementation Notes
+
+- Imported `dokploy.py` as a module using `importlib.util` to handle PEP 723 script format
+- 36 tests across 11 test classes covering all 10 function groups + bonus `get_state_file`
+- Tests run via `uv run --with pytest pytest tests/test_unit.py`
+- All filesystem tests use `tmp_path` for isolation
+- `monkeypatch` used for env vars and `__file__` overrides
+- Linter auto-sorted imports on write
+<!-- SECTION:NOTES:END -->

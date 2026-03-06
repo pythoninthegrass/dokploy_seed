@@ -34,6 +34,18 @@ def sample_state():
 
 
 @pytest.fixture
+def github_static_config():
+    """GitHub static-site config with new fields (buildType, domain.path, etc.)."""
+    return _load_fixture("github_static_config.yml")
+
+
+@pytest.fixture
+def github_dockerfile_config():
+    """GitHub dockerfile config with new fields (watchPaths, autoDeploy, etc.)."""
+    return _load_fixture("github_dockerfile_config.yml")
+
+
+@pytest.fixture
 def dokploy_yml(tmp_path, minimal_config):
     """Write a minimal dokploy.yml in tmp_path and return the path."""
     config_file = tmp_path / "dokploy.yml"

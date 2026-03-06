@@ -41,7 +41,11 @@ Per-environment overrides merged into the base config before any command runs.
 | Key | Required | Description |
 |-----|----------|-------------|
 | `environments.<env>.github` | no | Override `github` settings for this environment |
-| `environments.<env>.apps.<name>` | no | Override app properties (`command`, `env`, `dockerImage`, `domain`) |
+| `environments.<env>.apps.<name>` | no | Override app properties (see below) |
+
+### Overridable App Properties
+
+All per-app fields can be overridden per environment: `command`, `env`, `dockerImage`, `domain`, `buildType`, `dockerfile`, `dockerContextPath`, `dockerBuildStage`, `publishDirectory`, `autoDeploy`, `replicas`, `buildPath`, `triggerType`, `watchPaths`.
 
 ### Merging Semantics
 
@@ -59,6 +63,16 @@ Per-environment overrides merged into the base config before any command runs.
 | `apps[].command` | no | Command override, supports `{app_name}` refs |
 | `apps[].env` | no | Per-app env vars (not the project `.env`), supports `{app_name}` refs |
 | `apps[].domain` | no | Single domain object or list of domain objects |
+| `apps[].buildType` | no | Build type: `dockerfile` (default), `nixpacks`, `static`, `heroku`, `docker` |
+| `apps[].dockerfile` | no | Dockerfile path (default: `Dockerfile`, for `buildType: dockerfile`) |
+| `apps[].dockerContextPath` | no | Docker build context path (for `buildType: dockerfile`) |
+| `apps[].dockerBuildStage` | no | Docker build target stage (for `buildType: dockerfile`) |
+| `apps[].publishDirectory` | no | Publish directory (for `buildType: static`) |
+| `apps[].autoDeploy` | no | Enable auto-deploy on push (`true`/`false`) |
+| `apps[].replicas` | no | Number of app replicas (integer, minimum 1) |
+| `apps[].buildPath` | no | Build path for GitHub provider (default: `/`) |
+| `apps[].triggerType` | no | GitHub trigger type: `push` (default) or `manual` |
+| `apps[].watchPaths` | no | File paths to watch for auto-deploy triggers (list of strings) |
 
 ### Domain Object
 
@@ -68,6 +82,9 @@ Per-environment overrides merged into the base config before any command runs.
 | `domain.port` | yes | Container port to expose |
 | `domain.https` | yes | Enable HTTPS |
 | `domain.certificateType` | yes | `none` or `letsencrypt` |
+| `domain.path` | no | URL path (default: `/`) |
+| `domain.internalPath` | no | Internal routing path (default: `/`) |
+| `domain.stripPath` | no | Strip path prefix before forwarding (default: `false`) |
 
 ## `{app_name}` Resolution
 

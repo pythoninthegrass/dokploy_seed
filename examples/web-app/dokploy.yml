@@ -52,6 +52,7 @@ apps:
 
   - name: web
     source: github
+    autoDeploy: true
 
   - name: worker
     source: github

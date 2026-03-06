@@ -3,12 +3,18 @@
   "$id": "https://raw.githubusercontent.com/pythoninthegrass/dokploy_seed/main/schemas/dokploy.schema.json",
   "title": "Dokploy deployment config",
   "type": "object",
-  "required": ["project", "apps"],
+  "required": [
+    "project",
+    "apps"
+  ],
   "additionalProperties": false,
   "properties": {
     "project": {
       "type": "object",
-      "required": ["name", "description"],
+      "required": [
+        "name",
+        "description"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -21,14 +27,18 @@
         },
         "env_targets": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "App names that receive the filtered .env file"
         },
         "deploy_order": {
           "type": "array",
           "items": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "description": "Deploy waves: outer list is sequential, inner lists are parallel"
         }
@@ -36,7 +46,11 @@
     },
     "github": {
       "type": "object",
-      "required": ["owner", "repository", "branch"],
+      "required": [
+        "owner",
+        "repository",
+        "branch"
+      ],
       "additionalProperties": false,
       "description": "GitHub defaults for all github-sourced apps. Omit for Docker-only projects.",
       "properties": {
@@ -46,7 +60,7 @@
         },
         "repository": {
           "type": "string",
-          "description": "Repository name (not owner/repo — Dokploy prepends owner)"
+          "description": "Repository name (not owner/repo \u2014 Dokploy prepends owner)"
         },
         "branch": {
           "type": "string",
@@ -82,7 +96,7 @@
           },
           "apps": {
             "type": "object",
-            "description": "Per-app overrides keyed by app name. Can override command, env, dockerImage, and domain.",
+            "description": "Per-app overrides keyed by app name.",
             "additionalProperties": {
               "type": "object",
               "additionalProperties": false,
@@ -101,13 +115,72 @@
                 },
                 "domain": {
                   "oneOf": [
-                    { "$ref": "#/$defs/domain" },
+                    {
+                      "$ref": "#/$defs/domain"
+                    },
                     {
                       "type": "array",
-                      "items": { "$ref": "#/$defs/domain" }
+                      "items": {
+                        "$ref": "#/$defs/domain"
+                      }
                     }
                   ],
                   "description": "Domain config override"
+                },
+                "buildType": {
+                  "type": "string",
+                  "enum": [
+                    "dockerfile",
+                    "nixpacks",
+                    "static",
+                    "heroku",
+                    "docker"
+                  ],
+                  "description": "Application build type"
+                },
+                "dockerfile": {
+                  "type": "string",
+                  "description": "Dockerfile path (for buildType: dockerfile)"
+                },
+                "dockerContextPath": {
+                  "type": "string",
+                  "description": "Docker build context path (for buildType: dockerfile)"
+                },
+                "dockerBuildStage": {
+                  "type": "string",
+                  "description": "Docker build target stage (for buildType: dockerfile)"
+                },
+                "publishDirectory": {
+                  "type": "string",
+                  "description": "Publish directory (for buildType: static)"
+                },
+                "autoDeploy": {
+                  "type": "boolean",
+                  "description": "Enable auto-deploy on push"
+                },
+                "replicas": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Number of app replicas"
+                },
+                "buildPath": {
+                  "type": "string",
+                  "description": "Build path for GitHub provider (default: /)"
+                },
+                "triggerType": {
+                  "type": "string",
+                  "enum": [
+                    "push",
+                    "manual"
+                  ],
+                  "description": "GitHub trigger type"
+                },
+                "watchPaths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "File paths to watch for auto-deploy triggers"
                 }
               }
             }
@@ -120,7 +193,10 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "source"],
+        "required": [
+          "name",
+          "source"
+        ],
         "additionalProperties": false,
         "properties": {
           "name": {
@@ -129,7 +205,10 @@
           },
           "source": {
             "type": "string",
-            "enum": ["docker", "github"],
+            "enum": [
+              "docker",
+              "github"
+            ],
             "description": "App source type"
           },
           "dockerImage": {
@@ -146,20 +225,86 @@
           },
           "domain": {
             "oneOf": [
-              { "$ref": "#/$defs/domain" },
+              {
+                "$ref": "#/$defs/domain"
+              },
               {
                 "type": "array",
-                "items": { "$ref": "#/$defs/domain" }
+                "items": {
+                  "$ref": "#/$defs/domain"
+                }
               }
             ],
-            "description": "Domain config — single object or list of objects"
+            "description": "Domain config \u2014 single object or list of objects"
+          },
+          "buildType": {
+            "type": "string",
+            "enum": [
+              "dockerfile",
+              "nixpacks",
+              "static",
+              "heroku",
+              "docker"
+            ],
+            "default": "dockerfile",
+            "description": "Application build type (default: dockerfile)"
+          },
+          "dockerfile": {
+            "type": "string",
+            "description": "Dockerfile path (for buildType: dockerfile, default: Dockerfile)"
+          },
+          "dockerContextPath": {
+            "type": "string",
+            "description": "Docker build context path (for buildType: dockerfile)"
+          },
+          "dockerBuildStage": {
+            "type": "string",
+            "description": "Docker build target stage (for buildType: dockerfile)"
+          },
+          "publishDirectory": {
+            "type": "string",
+            "description": "Publish directory (for buildType: static)"
+          },
+          "autoDeploy": {
+            "type": "boolean",
+            "description": "Enable auto-deploy on push"
+          },
+          "replicas": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Number of app replicas"
+          },
+          "buildPath": {
+            "type": "string",
+            "description": "Build path for GitHub provider (default: /)"
+          },
+          "triggerType": {
+            "type": "string",
+            "enum": [
+              "push",
+              "manual"
+            ],
+            "description": "GitHub trigger type (default: push)"
+          },
+          "watchPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "File paths to watch for auto-deploy triggers"
           }
         },
         "if": {
-          "properties": { "source": { "const": "docker" } }
+          "properties": {
+            "source": {
+              "const": "docker"
+            }
+          }
         },
         "then": {
-          "required": ["dockerImage"]
+          "required": [
+            "dockerImage"
+          ]
         }
       }
     }
@@ -167,7 +312,12 @@
   "$defs": {
     "domain": {
       "type": "object",
-      "required": ["host", "port", "https", "certificateType"],
+      "required": [
+        "host",
+        "port",
+        "https",
+        "certificateType"
+      ],
       "additionalProperties": false,
       "properties": {
         "host": {
@@ -184,8 +334,23 @@
         },
         "certificateType": {
           "type": "string",
-          "enum": ["none", "letsencrypt"],
+          "enum": [
+            "none",
+            "letsencrypt"
+          ],
           "description": "TLS certificate type"
+        },
+        "path": {
+          "type": "string",
+          "description": "URL path (default: /)"
+        },
+        "internalPath": {
+          "type": "string",
+          "description": "Internal routing path (default: /)"
+        },
+        "stripPath": {
+          "type": "boolean",
+          "description": "Strip path prefix before forwarding (default: false)"
         }
       }
     }
