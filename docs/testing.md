@@ -54,6 +54,7 @@ tests/
   conftest.py              # Shared pytest fixtures + Hypothesis profiles
   strategies.py            # Reusable Hypothesis strategies
   test_unit.py             # Unit tests for pure functions in dokploy.py
+  test_integration.py      # Integration tests for DokployClient and cmd_* functions
   test_property.py         # Property-based tests (Hypothesis)
   fixtures/
     web_app_config.yml      # Realistic multi-app config (web, worker, redis)
