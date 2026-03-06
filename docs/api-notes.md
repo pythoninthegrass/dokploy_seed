@@ -25,3 +25,12 @@ Requires the `x-api-key` header.
 - **`application.deploy`** returns an empty response body on success.
 
 - **`project.create`** returns a nested structure: `{"project": {...}, "environment": {...}}`.
+
+## Health Check / Pre-flight
+
+The `check` command uses `GET /api/project.all` to validate the API key.
+This endpoint is a good choice for pre-flight auth validation because:
+
+- It requires authentication (returns 401/403 with an invalid key)
+- It returns 200 with a small JSON payload on success
+- It has no side effects (read-only)

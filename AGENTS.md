@@ -25,6 +25,7 @@ examples/                   # Example configs (web-app, docker-only, minimal)
 
 ```bash
 uv run --script dokploy.py --help                       # Show usage
+uv run --script dokploy.py check                        # Pre-flight checks
 uv run --script dokploy.py --env prod setup             # Create project
 uv run --script dokploy.py --env prod env               # Push env vars
 uv run --script dokploy.py --env prod deploy            # Deploy apps

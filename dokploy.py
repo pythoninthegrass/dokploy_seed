@@ -18,6 +18,7 @@
 Dokploy deployment script — config-driven via dokploy.yml.
 
 Usage:
+    dokploy.py check
     dokploy.py --env <environment> <setup|env|deploy|status|destroy>
 
 Environment can also be set via DOKPLOY_ENV env var.
@@ -103,10 +104,7 @@ def validate_env_references(cfg: dict) -> None:
     for env_name, env_cfg in environments.items():
         for app_name in env_cfg.get("apps", {}):
             if app_name not in app_names:
-                print(
-                    f"ERROR: environments.{env_name}.apps references "
-                    f"unknown app '{app_name}'"
-                )
+                print(f"ERROR: environments.{env_name}.apps references unknown app '{app_name}'")
                 sys.exit(1)
 
 
@@ -201,6 +199,130 @@ def save_state(state: dict, state_file: Path) -> None:
     state_file.parent.mkdir(parents=True, exist_ok=True)
     state_file.write_text(json.dumps(state, indent=2) + "\n")
     print(f"State saved to {state_file}")
+
+
+def cmd_check(repo_root: Path) -> None:
+    """Pre-flight checks: env vars, server reachability, API auth, config."""
+    passed = 0
+    failed = 0
+
+    def _pass(label: str, detail: str = "") -> None:
+        nonlocal passed
+        passed += 1
+        msg = f"  PASS  {label}"
+        if detail:
+            msg += f" — {detail}"
+        print(msg)
+
+    def _fail(label: str, detail: str = "") -> None:
+        nonlocal failed
+        failed += 1
+        msg = f"  FAIL  {label}"
+        if detail:
+            msg += f" — {detail}"
+        print(msg)
+
+    def _warn(label: str, detail: str = "") -> None:
+        msg = f"  WARN  {label}"
+        if detail:
+            msg += f" — {detail}"
+        print(msg)
+
+    def _skip(label: str, detail: str = "") -> None:
+        msg = f"  SKIP  {label}"
+        if detail:
+            msg += f" — {detail}"
+        print(msg)
+
+    print("Running pre-flight checks...\n")
+
+    # 1. Env vars
+    api_key = None
+    try:
+        api_key = config("DOKPLOY_API_KEY")
+        _pass("DOKPLOY_API_KEY is set")
+    except Exception:
+        _fail("DOKPLOY_API_KEY is not set")
+
+    base_url = None
+    try:
+        base_url = config("DOKPLOY_URL", default="https://dokploy.example.com")
+        if base_url == "https://dokploy.example.com":
+            _warn(
+                "DOKPLOY_URL",
+                "using default placeholder (https://dokploy.example.com)",
+            )
+        else:
+            _pass("DOKPLOY_URL", base_url)
+    except Exception:
+        _fail("DOKPLOY_URL is not set")
+
+    # 2. URL reachability
+    if base_url and base_url != "https://dokploy.example.com":
+        try:
+            resp = httpx.get(base_url, timeout=10.0, follow_redirects=True)
+            _pass("Server reachable", f"HTTP {resp.status_code}")
+        except httpx.ConnectError:
+            _fail("Server unreachable", f"cannot connect to {base_url}")
+        except httpx.TimeoutException:
+            _fail("Server unreachable", f"timeout connecting to {base_url}")
+        except Exception as exc:
+            _fail("Server reachable", str(exc))
+    else:
+        _skip(
+            "Server reachability",
+            "no valid DOKPLOY_URL configured",
+        )
+
+    # 3. API key validity
+    if api_key and base_url and base_url != "https://dokploy.example.com":
+        try:
+            resp = httpx.get(
+                f"{base_url.rstrip('/')}/api/project.all",
+                headers={"x-api-key": api_key},
+                timeout=10.0,
+            )
+            if resp.status_code == 200:
+                _pass("API key valid", "authenticated successfully")
+            else:
+                _fail(
+                    "API key invalid",
+                    f"HTTP {resp.status_code}",
+                )
+        except Exception as exc:
+            _fail("API key check", str(exc))
+    else:
+        _skip(
+            "API key validation",
+            "missing DOKPLOY_API_KEY or DOKPLOY_URL",
+        )
+
+    # 4. Config file
+    config_path = repo_root / "dokploy.yml"
+    if config_path.exists():
+        try:
+            with config_path.open() as f:
+                data = yaml.safe_load(f)
+            if not isinstance(data, dict):
+                _fail("dokploy.yml", "file does not contain a YAML mapping")
+            else:
+                missing = [k for k in ("project", "apps") if k not in data]
+                if missing:
+                    _fail(
+                        "dokploy.yml",
+                        f"missing required keys: {', '.join(missing)}",
+                    )
+                else:
+                    _pass("dokploy.yml", "valid with project and apps keys")
+        except yaml.YAMLError as exc:
+            _fail("dokploy.yml", f"YAML parse error: {exc}")
+    else:
+        _fail("dokploy.yml", f"not found at {config_path}")
+
+    # Summary
+    print(f"\n{passed} passed, {failed} failed")
+    if failed:
+        sys.exit(1)
 
 
 def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
@@ -344,9 +466,7 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
         print(f"  {name}: {info['applicationId']}")
 
 
-def cmd_env(
-    client: DokployClient, cfg: dict, state_file: Path, repo_root: Path
-) -> None:
+def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path) -> None:
     state = load_state(state_file)
     env_targets = cfg["project"].get("env_targets", [])
     env_file = repo_root / ".env"
@@ -419,9 +539,7 @@ def cmd_status(client: DokployClient, state_file: Path) -> None:
     print(f"Project: {state['projectId']}")
     print()
     for name, info in state["apps"].items():
-        app: dict = client.get(
-            "application.one", {"applicationId": info["applicationId"]}
-        )  # type: ignore[assignment]
+        app: dict = client.get("application.one", {"applicationId": info["applicationId"]})  # type: ignore[assignment]
         status = app.get("applicationStatus", "unknown")
         print(f"  {name:10s}  {status}")
 
@@ -440,9 +558,7 @@ def cmd_destroy(client: DokployClient, state_file: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Dokploy deployment script — config-driven via dokploy.yml."
-    )
+    parser = argparse.ArgumentParser(description="Dokploy deployment script — config-driven via dokploy.yml.")
     parser.add_argument(
         "--env",
         default=None,
@@ -450,10 +566,14 @@ def main() -> None:
     )
     parser.add_argument(
         "command",
-        choices=["setup", "env", "deploy", "status", "destroy"],
+        choices=["check", "setup", "env", "deploy", "status", "destroy"],
         help="Command to run",
     )
     args = parser.parse_args()
+
+    if args.command == "check":
+        cmd_check(Path(__file__).resolve().parent)
+        return
 
     env_name = args.env or config("DOKPLOY_ENV", default="dev")
 
