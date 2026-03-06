@@ -4,7 +4,7 @@ title: Integration tests for DokployClient and cmd_* functions
 status: In Progress
 assignee: []
 created_date: '2026-03-06 08:13'
-updated_date: '2026-03-06 08:14'
+updated_date: '2026-03-06 15:40'
 labels:
   - testing
   - integration-tests
@@ -81,10 +81,24 @@ Write pytest integration tests for `DokployClient` and the `cmd_*` command funct
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 DokployClient get/post methods tested with respx-mocked responses
-- [ ] #2 Each cmd_* function has at least one happy-path and one error-path test
-- [ ] #3 Full pipeline test (setup→env→deploy→status→destroy) passes with mocked API
-- [ ] #4 API call payloads verified against docs/api-notes.md quirks (e.g. repository name format, saveBuildType explicit strings)
-- [ ] #5 State file lifecycle verified: created by setup, read by env/deploy/status, deleted by destroy
-- [ ] #6 All tests pass with `uv run pytest tests/test_integration.py`
+- [x] #1 DokployClient get/post methods tested with respx-mocked responses
+- [x] #2 Each cmd_* function has at least one happy-path and one error-path test
+- [x] #3 Full pipeline test (setup→env→deploy→status→destroy) passes with mocked API
+- [x] #4 API call payloads verified against docs/api-notes.md quirks (e.g. repository name format, saveBuildType explicit strings)
+- [x] #5 State file lifecycle verified: created by setup, read by env/deploy/status, deleted by destroy
+- [x] #6 All tests pass with `uv run pytest tests/test_integration.py`
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Implementation Notes
+
+- Used `respx.Router` + `httpx.MockTransport` to inject mock transport into `DokployClient.client`
+- Helper `_make_client()` creates a client with mocked transport
+- Helper `_setup_router()` wires standard mock routes for cmd_setup tests
+- `cmd_check` tests use `respx.mock` context manager (global httpx patching) since it uses top-level `httpx.get()` directly
+- All other cmd_* tests use `respx.Router` with `_make_client()` for isolated mocking
+- Added `respx>=0.22.0` to test dependencies in pyproject.toml
+- 32 integration tests total across 9 test classes
+<!-- SECTION:NOTES:END -->

@@ -1,10 +1,10 @@
 ---
 id: TASK-001.04
 title: Property-based tests with Hypothesis for config and env processing
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-06 08:13'
-updated_date: '2026-03-06 08:16'
+updated_date: '2026-03-06 16:27'
 labels:
   - testing
   - property-based
@@ -83,11 +83,25 @@ Consider using `hypothesis-jsonschema` to generate configs from `schemas/dokploy
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Hypothesis strategies exist for env content, app configs, state dicts, and full dokploy configs
-- [ ] #2 filter_env tested for idempotency, prefix exclusion, and subset properties
-- [ ] #3 resolve_refs tested for known-ref resolution and unknown-ref preservation
-- [ ] #4 merge_env_overrides tested for immutability of original config and override-wins semantics
-- [ ] #5 validate_config tested with both valid and intentionally invalid generated configs
-- [ ] #6 All property tests pass with at least 100 examples each
-- [ ] #7 Hypothesis profiles configured for CI (deterministic, fewer examples) and dev (more examples)
+- [x] #1 Hypothesis strategies exist for env content, app configs, state dicts, and full dokploy configs
+- [x] #2 filter_env tested for idempotency, prefix exclusion, and subset properties
+- [x] #3 resolve_refs tested for known-ref resolution and unknown-ref preservation
+- [x] #4 merge_env_overrides tested for immutability of original config and override-wins semantics
+- [x] #5 validate_config tested with both valid and intentionally invalid generated configs
+- [x] #6 All property tests pass with at least 100 examples each
+- [x] #7 Hypothesis profiles configured for CI (deterministic, fewer examples) and dev (more examples)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Worktree: ~/git/dokploy_seed.001.04-property-tests (branch: 001.04-property-tests)
+
+Files created/modified:
+- tests/strategies.py — reusable Hypothesis strategies (env_content, exclude_prefixes, state_dict, app_config, dokploy_config, etc.)
+- tests/test_property.py — 22 property-based tests across 6 test classes
+- tests/conftest.py — added Hypothesis profiles (ci: deterministic/100 examples, dev: 500 examples)
+- pyproject.toml — added 'property' marker
+
+Notable finding: resolve_refs uses \\{(\\w+)\\} regex which cannot match app names containing hyphens. Tests use ref_safe=True strategy to generate only \\w-compatible names for resolve_refs tests. This is a known limitation of the current implementation, not a bug introduced by these tests.
+<!-- SECTION:NOTES:END -->
