@@ -2,14 +2,12 @@
 
 import copy
 import importlib.util
+import pytest
 import re
 import sys
-from pathlib import Path
-
-import pytest
 import yaml
-from hypothesis import given, settings, assume, HealthCheck
-from hypothesis import strategies as st
+from hypothesis import HealthCheck, assume, given, settings, strategies as st
+from pathlib import Path
 
 _STRATEGIES = Path(__file__).resolve().parent / "strategies.py"
 _strat_spec = importlib.util.spec_from_file_location("strategies", _STRATEGIES)

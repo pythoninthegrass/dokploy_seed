@@ -2,7 +2,6 @@
 
 from hypothesis import strategies as st
 
-
 app_name = st.from_regex(r"[a-z][a-z0-9-]{0,15}", fullmatch=True)
 
 # resolve_refs uses \{(\w+)\} — only matches [a-zA-Z0-9_], not hyphens.

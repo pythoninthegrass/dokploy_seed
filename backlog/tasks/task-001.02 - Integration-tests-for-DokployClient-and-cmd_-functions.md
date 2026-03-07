@@ -1,10 +1,10 @@
 ---
 id: TASK-001.02
 title: Integration tests for DokployClient and cmd_* functions
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-06 08:13'
-updated_date: '2026-03-06 15:40'
+updated_date: '2026-03-06 18:13'
 labels:
   - testing
   - integration-tests

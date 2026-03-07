@@ -1,0 +1,125 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: "3.0"
+
+set: ['e', 'u', 'pipefail']
+shopt: ['globstar']
+
+dotenv: ['.env']
+
+env:
+  VENV_DIR: "{{.ROOT_DIR}}/.venv"
+  PATH: "{{.VENV_DIR}}/bin:{{.PATH}}"
+
+includes:
+  orbstack:
+    taskfile: ./taskfiles/orbstack.yml
+    aliases: ["orb"]
+  uv:
+    taskfile: ./taskfiles/uv.yml
+
+tasks:
+  default:
+    desc: "List available tasks"
+    cmds:
+      - task --list
+
+  lint:
+    desc: "Run ruff linter"
+    cmds:
+      - ruff check --fix --respect-gitignore
+
+  format:
+    desc: "Run ruff formatter"
+    cmds:
+      - ruff format --respect-gitignore
+
+  test:
+    desc: "Run unit and property tests"
+    cmds:
+      - uv run pytest tests/ -v {{.CLI_ARGS}}
+
+  test:unit:
+    desc: "Run unit tests only"
+    cmds:
+      - uv run pytest tests/ -m unit -v
+
+  test:property:
+    desc: "Run property-based tests only"
+    cmds:
+      - uv run pytest tests/ -m property -v
+
+  test:integration:
+    desc: "Run integration tests only"
+    cmds:
+      - uv run pytest tests/ -m integration -v
+
+  e2e:
+    desc: "Run E2E tests against a Dokploy instance"
+    summary: |
+      Runs E2E tests against a live Dokploy instance.
+      Set DOKPLOY_URL and DOKPLOY_API_KEY env vars, or use .env file.
+
+      For local OrbStack setup, run `task e2e:setup` first.
+    silent: true
+    cmds:
+      - >
+        uv run pytest tests/ -m e2e -o "addopts=" -v --timeout=120
+        {{.CLI_ARGS}}
+
+  e2e:setup:
+    desc: "Create OrbStack VM and install Dokploy"
+    silent: true
+    cmds:
+      - task: orbstack:setup-dokploy
+
+  e2e:health:
+    desc: "Check if Dokploy is reachable"
+    silent: true
+    cmds:
+      - task: orbstack:health
+
+  e2e:teardown:
+    desc: "Delete the OrbStack VM"
+    silent: true
+    cmds:
+      - task: orbstack:delete
+
+  e2e:run:
+    desc: "One-shot: setup VM, run E2E tests, teardown VM"
+    silent: true
+    deps: [e2e:snapshot]
+    cmds:
+      - task: e2e:setup
+      - defer: { task: e2e:teardown }
+      - task: e2e
+
+  e2e:snapshot:
+    desc: "Build and export a pre-configured VM snapshot"
+    silent: true
+    cmds:
+      - task: orbstack:snapshot
+
+  e2e:recreate:
+    desc: "Recreate the OrbStack VM from scratch"
+    silent: true
+    cmds:
+      - task: orbstack:recreate
+
+  pyclean:
+    desc: "Remove .pyc and __pycache__"
+    cmds:
+      - |
+        args=(
+          .
+          --debris
+          --verbose
+        )
+        case "{{.CLI_ARGS}}" in
+          dry-run)
+            pyclean "${args[@]}" --dry-run
+            ;;
+          *)
+            pyclean "${args[@]}"
+            ;;
+        esac

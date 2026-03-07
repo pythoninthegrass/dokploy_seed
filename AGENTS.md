@@ -82,6 +82,7 @@ Always use Context7 MCP when I need library/API documentation, code generation, 
 - jdx/mise
 - max-sixty/worktrunk
 - mrlesk/backlog.md
+- websites/orbstack_dev
 - websites/taskfile_dev
 
 <!-- BACKLOG.MD MCP GUIDELINES START -->

@@ -2,6 +2,8 @@
 
 # ETC
 CLAUDE.md
+.cache/
+.task/
 
 # General
 .DS_Store

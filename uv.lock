@@ -129,6 +129,7 @@ test = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "pytest-datafiles" },
+    { name = "pytest-timeout" },
     { name = "pytest-xdist" },
     { name = "respx" },
 ]
@@ -142,6 +143,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.24.0,<1.0.0" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=6.1.1" },
     { name = "pytest-datafiles", marker = "extra == 'test'", specifier = ">=3.0.0,<4.0.0" },
+    { name = "pytest-timeout", marker = "extra == 'test'", specifier = ">=2.3.1" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3.6.1,<4.0.0" },
     { name = "python-decouple", specifier = ">=3.8" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -360,6 +362,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/fc/8d/081ba12c1ea4eb1b899eb61b4501136c233492280fdb70343edcdfdf26ce/pytest_datafiles-3.0.1.tar.gz", hash = "sha256:05fc3eef2429fe26ae42283cccb1f3831b53b12d4bd8b4734bf42973d4af6e16", size = 222220, upload-time = "2026-01-04T15:08:23.287Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4b/23/88880d5dc36eac9696ad40823e37c1fdbfa81a67b9cfd0ed445b3ed7ec54/pytest_datafiles-3.0.1-py3-none-any.whl", hash = "sha256:c48f27a8afec03a482a10587ab5f5ab930ced4cbdeb2e3a2cbcc0323a51d22c7", size = 6357, upload-time = "2026-01-04T15:08:25.132Z" },
+]
+
+[[package]]
+name = "pytest-timeout"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/82/4c9ecabab13363e72d880f2fb504c5f750433b2b6f16e99f4ec21ada284c/pytest_timeout-2.4.0.tar.gz", hash = "sha256:7e68e90b01f9eff71332b25001f85c75495fc4e3a836701876183c4bcfd0540a", size = 17973, upload-time = "2025-05-05T19:44:34.99Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/b6/3127540ecdf1464a00e5a01ee60a1b09175f6913f0644ac748494d9c4b21/pytest_timeout-2.4.0-py3-none-any.whl", hash = "sha256:c42667e5cdadb151aeb5b26d114aff6bdf5a907f176a007a30b940d3d865b5c2", size = 14382, upload-time = "2025-05-05T19:44:33.502Z" },
 ]
 
 [[package]]

@@ -1,0 +1,33 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Dokploy
+        id: dokploy
+        run: |
+          chmod +x tests/setup-dokploy.sh
+          sudo tests/setup-dokploy.sh
+
+      - uses: astral-sh/setup-uv@v6
+
+      - run: uv python install 3.13
+
+      - run: uv sync --extra test
+
+      - name: Run E2E tests
+        env:
+          DOKPLOY_URL: ${{ steps.dokploy.outputs.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ steps.dokploy.outputs.DOKPLOY_API_KEY }}
+        run: uv run pytest tests/ -m e2e -o "addopts=" -v --timeout=120

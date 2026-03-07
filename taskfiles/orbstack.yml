@@ -1,0 +1,183 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: "3.0"
+
+set: ['e', 'u', 'pipefail']
+shopt: ['globstar']
+
+env:
+  ARCH: '{{.ARCH | default "arm64" }}'
+  USERNAME: '{{.USER_NAME | default "ubuntu" }}'
+  CLOUD_CONFIG: "{{.ROOT_DIR}}/tests/cloud-init.yml"
+  OS_NAME: '{{.OS_NAME | default "ubuntu" }}'
+  OS_VERSION: '{{.OS_VERSION | default "noble" }}'
+  VM_NAME: '{{.VM_NAME | default "dokploy-e2e" }}'
+  VM_SNAPSHOT: "{{.ROOT_DIR}}/.cache/dokploy-e2e.tar.zst"
+
+tasks:
+  create:
+    desc: "Create the dokploy-e2e OrbStack VM"
+    cmds:
+      - |
+        orb create \
+          -a "{{.ARCH}}" \
+          -u "{{.USERNAME}}" \
+          -c "{{.CLOUD_CONFIG}}" \
+          "{{.OS_NAME}}:{{.OS_VERSION}}" \
+          "{{.VM_NAME}}"
+    run: once
+    silent: true
+    ignore_error: true
+    status:
+      - orb list 2>/dev/null | grep -q "{{.VM_NAME}}"
+
+  list:
+    desc: "List OrbStack VMs"
+    cmds:
+      - orb list
+    run: once
+    silent: true
+
+  start:
+    desc: "Start the dokploy-e2e VM"
+    cmds:
+      - orb start "{{.VM_NAME}}"
+    run: once
+    silent: true
+    preconditions:
+      - sh: >
+          orb list 2>/dev/null
+          | grep -q '^{{.VM_NAME}}\s'
+        msg: "VM doesn't exist"
+      - sh: >
+          orb list 2>/dev/null
+          | awk '$1=="{{.VM_NAME}}" && $2=="running" {exit 1}'
+        msg: "VM is already running"
+
+  exec:
+    desc: "SSH into the dokploy-e2e VM"
+    cmds:
+      - ssh "{{.VM_NAME}}@orb"
+    run: once
+    silent: true
+    ignore_error: true
+
+  stop:
+    desc: "Stop the dokploy-e2e VM"
+    cmds:
+      - orb stop "{{.VM_NAME}}"
+    run: once
+    silent: true
+    preconditions:
+      - sh: >
+          orb list 2>/dev/null
+          | grep -q '^{{.VM_NAME}}\s'
+        msg: "VM doesn't exist"
+      - sh: >
+          orb list 2>/dev/null
+          | awk '$1=="{{.VM_NAME}}" && $2=="stopped" {exit 1}'
+        msg: "VM is already stopped"
+
+  delete:
+    desc: "Delete the dokploy-e2e VM"
+    cmds:
+      - cmd: orb delete "{{.VM_NAME}}" -f 2>/dev/null
+        ignore_error: true
+    run: once
+    silent: true
+    status:
+      - >
+        ! orb list 2>/dev/null
+        | grep -q '^{{.VM_NAME}}\s'
+
+  update:
+    desc: "Update OrbStack app"
+    cmds:
+      - orb update
+    run: once
+
+  import:
+    internal: true
+    silent: true
+    desc: "Import base VM from snapshot"
+    status:
+      - >
+        orb list 2>/dev/null | grep -q "^{{.VM_NAME}}[[:space:]]"
+        || ! test -f "{{.VM_SNAPSHOT}}"
+    cmds:
+      - orb import -n "{{.VM_NAME}}" "{{.VM_SNAPSHOT}}"
+      - orb start "{{.VM_NAME}}" 2>/dev/null || true
+
+  setup-fresh:
+    internal: true
+    silent: true
+    desc: "Create VM and run Dokploy setup from scratch"
+    deps: [import]
+    status:
+      - curl -sf "http://{{.VM_NAME}}.orb.local:3000/api/trpc/settings.health" >/dev/null 2>&1
+    cmds:
+      - task: create
+      - |
+        echo "Waiting for cloud-init to finish..."
+        orb -m "{{.VM_NAME}}" -u root \
+          cloud-init status --wait 2>/dev/null || sleep 10
+      - |
+        orb -m "{{.VM_NAME}}" -u root \
+          bash "/mnt/mac{{.ROOT_DIR}}/tests/setup-dokploy.sh"
+
+  setup-dokploy:
+    desc: "Set up Dokploy VM (imports snapshot if available, otherwise builds from scratch)"
+    silent: true
+    deps: [setup-fresh]
+
+  snapshot:
+    desc: "Build and export a VM snapshot (cloud-init + swarm + images, pre-services)"
+    silent: true
+    sources:
+      - "{{.ROOT_DIR}}/tests/cloud-init.yml"
+      - "{{.ROOT_DIR}}/tests/setup-dokploy.sh"
+    generates:
+      - "{{.VM_SNAPSHOT}}"
+    cmds:
+      - task: delete
+      - task: create
+      - |
+        echo "Waiting for cloud-init to finish..."
+        orb -m "{{.VM_NAME}}" -u root \
+          cloud-init status --wait 2>/dev/null || sleep 10
+      - |
+        orb -m "{{.VM_NAME}}" -u root \
+          env PREPARE_ONLY=1 bash "/mnt/mac{{.ROOT_DIR}}/tests/setup-dokploy.sh"
+      - orb -m "{{.VM_NAME}}" -u root touch /etc/cloud/cloud-init.disabled
+      - orb -m "{{.VM_NAME}}" -u root systemctl stop docker
+      - orb -m "{{.VM_NAME}}" -u root sync
+      - orb stop "{{.VM_NAME}}"
+      - mkdir -p "$(dirname "{{.VM_SNAPSHOT}}")"
+      - orb export "{{.VM_NAME}}" "{{.VM_SNAPSHOT}}"
+      - task: delete
+
+  export:
+    desc: "Export the current VM to a snapshot file"
+    cmds:
+      - orb stop "{{.VM_NAME}}" 2>/dev/null || true
+      - mkdir -p "$(dirname "{{.VM_SNAPSHOT}}")"
+      - orb export "{{.VM_NAME}}" "{{.VM_SNAPSHOT}}"
+      - orb start "{{.VM_NAME}}"
+    preconditions:
+      - sh: >
+          orb list 2>/dev/null
+          | grep -q '^{{.VM_NAME}}\s'
+        msg: "VM doesn't exist"
+
+  health:
+    desc: "Check Dokploy health from macOS"
+    cmds:
+      - curl -sf "http://{{.VM_NAME}}.orb.local:3000/api/trpc/settings.health"
+    silent: true
+
+  recreate:
+    desc: "Delete and recreate the VM from scratch"
+    cmds:
+      - task: delete
+      - task: create
+      - task: setup-dokploy

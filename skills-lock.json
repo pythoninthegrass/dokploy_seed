@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "orbstack-best-practices": {
+      "source": "0xbigboss/claude-code",
+      "sourceType": "github",
+      "computedHash": "a8897604fd876485e7d2548ce4f23c41e22e971bfd9c9d08db6543437a64eee8"
+    },
     "worktrunk": {
       "source": "max-sixty/worktrunk",
       "sourceType": "github",
