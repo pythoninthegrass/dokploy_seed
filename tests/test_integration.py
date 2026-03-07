@@ -783,3 +783,131 @@ class TestFullPipeline:
         # 5. Destroy — state file should be deleted
         dokploy.cmd_destroy(client, state_file)
         assert not state_file.exists()
+
+
+def _make_project_all_response(
+    project_name: str,
+    project_id: str = "proj-existing-001",
+    environment_id: str = "env-existing-001",
+    apps: dict[str, dict] | None = None,
+) -> list[dict]:
+    """Build a mock project.all response with nested environments/applications."""
+    if apps is None:
+        apps = {}
+    applications = [
+        {
+            "applicationId": info["applicationId"],
+            "name": name,
+            "appName": info["appName"],
+        }
+        for name, info in apps.items()
+    ]
+    return [
+        {
+            "projectId": project_id,
+            "name": project_name,
+            "description": "",
+            "environments": [
+                {
+                    "environmentId": environment_id,
+                    "applications": applications,
+                }
+            ],
+        }
+    ]
+
+
+class TestCmdImport:
+    def test_happy_path(self, tmp_path, minimal_config):
+        """Import writes correct state file from existing project."""
+        server_apps = {
+            "app": {"applicationId": "app-srv-001", "appName": "app-generated"},
+        }
+        projects = _make_project_all_response("my-app", apps=server_apps)
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/project.all").mock(return_value=httpx.Response(200, json=projects))
+        client = _make_client(router)
+
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        dokploy.cmd_import(client, minimal_config, state_file)
+
+        assert state_file.exists()
+        state = json.loads(state_file.read_text())
+        assert state["projectId"] == "proj-existing-001"
+        assert state["environmentId"] == "env-existing-001"
+        assert state["apps"]["app"]["applicationId"] == "app-srv-001"
+        assert state["apps"]["app"]["appName"] == "app-generated"
+
+    def test_multi_app(self, tmp_path, web_app_config):
+        """Import maps all apps from config to server-side applications."""
+        server_apps = {
+            "redis": {"applicationId": "app-r-001", "appName": "redis-gen"},
+            "web": {"applicationId": "app-w-002", "appName": "web-gen"},
+            "worker": {"applicationId": "app-k-003", "appName": "worker-gen"},
+            "beat": {"applicationId": "app-b-004", "appName": "beat-gen"},
+            "flower": {"applicationId": "app-f-005", "appName": "flower-gen"},
+        }
+        projects = _make_project_all_response("my-web-app", apps=server_apps)
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/project.all").mock(return_value=httpx.Response(200, json=projects))
+        client = _make_client(router)
+
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        dokploy.cmd_import(client, web_app_config, state_file)
+
+        state = json.loads(state_file.read_text())
+        assert len(state["apps"]) == 5
+        for name in ("redis", "web", "worker", "beat", "flower"):
+            assert name in state["apps"]
+            assert "applicationId" in state["apps"][name]
+            assert "appName" in state["apps"][name]
+
+    def test_no_matching_project(self, tmp_path, minimal_config):
+        """Exits with error when no project matches the config name."""
+        projects = _make_project_all_response("other-project")
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/project.all").mock(return_value=httpx.Response(200, json=projects))
+        client = _make_client(router)
+
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        with pytest.raises(SystemExit):
+            dokploy.cmd_import(client, minimal_config, state_file)
+
+    def test_state_file_already_exists(self, tmp_path, minimal_config):
+        """Exits with error when state file already exists."""
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/project.all").mock(return_value=httpx.Response(200, json=[]))
+        client = _make_client(router)
+
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text("{}")
+
+        with pytest.raises(SystemExit):
+            dokploy.cmd_import(client, minimal_config, state_file)
+
+    def test_missing_app_on_server(self, tmp_path, minimal_config):
+        """Exits with error when a config app is not found on the server."""
+        # Server has no applications
+        projects = _make_project_all_response("my-app", apps={})
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/project.all").mock(return_value=httpx.Response(200, json=projects))
+        client = _make_client(router)
+
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        with pytest.raises(SystemExit):
+            dokploy.cmd_import(client, minimal_config, state_file)
+
+    def test_empty_project_list(self, tmp_path, minimal_config):
+        """Exits with error when server has no projects."""
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/project.all").mock(return_value=httpx.Response(200, json=[]))
+        client = _make_client(router)
+
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        with pytest.raises(SystemExit):
+            dokploy.cmd_import(client, minimal_config, state_file)

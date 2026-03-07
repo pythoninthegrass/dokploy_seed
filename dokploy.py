@@ -164,9 +164,7 @@ def filter_env(content: str, exclude_prefixes: list[str]) -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 
-def build_github_provider_payload(
-    app_id: str, app_def: dict, github_cfg: dict, github_id: str
-) -> dict:
+def build_github_provider_payload(app_id: str, app_def: dict, github_cfg: dict, github_id: str) -> dict:
     """Build payload for application.saveGithubProvider."""
     return {
         "applicationId": app_id,
@@ -456,9 +454,7 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
         elif app_def["source"] == "github":
             assert github_cfg is not None
             print(f"Configuring GitHub provider for {name}...")
-            provider_payload = build_github_provider_payload(
-                app_id, app_def, github_cfg, github_id
-            )
+            provider_payload = build_github_provider_payload(app_id, app_def, github_cfg, github_id)
             client.post("application.saveGithubProvider", provider_payload)
 
             build_type = app_def.get("buildType", "dockerfile")
@@ -603,6 +599,63 @@ def cmd_destroy(client: DokployClient, state_file: Path) -> None:
     print("\nDestroy complete.")
 
 
+def cmd_import(client: DokployClient, cfg: dict, state_file: Path) -> None:
+    if state_file.exists():
+        print(f"ERROR: State file already exists: {state_file}")
+        print("Delete the state file first if you want to re-import.")
+        sys.exit(1)
+
+    project_name = cfg["project"]["name"]
+    print(f"Fetching projects from server...")
+    projects = client.get("project.all")
+
+    matching = [p for p in projects if p["name"] == project_name]
+    if not matching:
+        print(f"ERROR: No project named '{project_name}' found on the server.")
+        sys.exit(1)
+
+    project = matching[0]
+    project_id = project["projectId"]
+    print(f"  Found project: {project_id}")
+
+    environments = project.get("environments", [])
+    if not environments:
+        print("ERROR: Project has no environments.")
+        sys.exit(1)
+
+    environment = environments[0]
+    environment_id = environment["environmentId"]
+    print(f"  Environment: {environment_id}")
+
+    server_apps = {app["name"]: app for app in environment.get("applications", [])}
+
+    config_app_names = [app_def["name"] for app_def in cfg["apps"]]
+    missing = [name for name in config_app_names if name not in server_apps]
+    if missing:
+        print(f"ERROR: Apps not found on server: {', '.join(missing)}")
+        sys.exit(1)
+
+    state: dict = {
+        "projectId": project_id,
+        "environmentId": environment_id,
+        "apps": {},
+    }
+
+    for name in config_app_names:
+        srv = server_apps[name]
+        state["apps"][name] = {
+            "applicationId": srv["applicationId"],
+            "appName": srv["appName"],
+        }
+        print(f"  {name}: id={srv['applicationId']} appName={srv['appName']}")
+
+    save_state(state, state_file)
+    print("\nImport complete!")
+    print(f"  Project: {project_id}")
+    for name, info in state["apps"].items():
+        print(f"  {name}: {info['applicationId']}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Dokploy deployment script — config-driven via dokploy.yml.")
     parser.add_argument(
@@ -612,7 +665,7 @@ def main() -> None:
     )
     parser.add_argument(
         "command",
-        choices=["check", "setup", "env", "deploy", "status", "destroy"],
+        choices=["check", "setup", "env", "deploy", "status", "destroy", "import"],
         help="Command to run",
     )
     args = parser.parse_args()
@@ -647,6 +700,8 @@ def main() -> None:
             cmd_status(client, state_file)
         case "destroy":
             cmd_destroy(client, state_file)
+        case "import":
+            cmd_import(client, cfg, state_file)
 
 
 if __name__ == "__main__":
