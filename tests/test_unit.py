@@ -467,11 +467,12 @@ class TestMergeEnvOverridesNewFields:
 
     def test_domain_override_merges(self, github_static_config):
         """Environment domain override merges into app."""
+        expected = github_static_config["environments"]["prod"]["apps"]["app"]["domain"]
         merged = dokploy.merge_env_overrides(github_static_config, "prod")
         app = next(a for a in merged["apps"] if a["name"] == "app")
-        assert app["domain"]["host"] == "dev.fuckfortyseven.org"
-        assert app["domain"]["port"] == 80
-        assert app["domain"]["https"] is True
+        assert app["domain"]["host"] == expected["host"]
+        assert app["domain"]["port"] == expected["port"]
+        assert app["domain"]["https"] == expected["https"]
         assert "path" not in app["domain"]
 
     def test_base_build_type_preserved(self, github_static_config):
