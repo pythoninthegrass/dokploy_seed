@@ -243,8 +243,9 @@
               "dockerfile",
               "nixpacks",
               "static",
-              "heroku",
-              "docker"
+              "heroku_buildpacks",
+              "paketo_buildpacks",
+              "railpack"
             ],
             "default": "dockerfile",
             "description": "Application build type (default: dockerfile)"
@@ -296,6 +297,11 @@
               "type": "string"
             },
             "description": "File paths to watch for auto-deploy triggers"
+          },
+          "create_env_file": {
+            "type": "boolean",
+            "default": false,
+            "description": "Write env vars to a .env file in the container working directory (default: false)"
           }
         },
         "if": {

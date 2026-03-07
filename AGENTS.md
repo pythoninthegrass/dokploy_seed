@@ -77,6 +77,8 @@ Always use Context7 MCP when I need library/API documentation, code generation, 
 
 ### Libraries
 
+- astral-sh/uv
+- astral-sh/ruff
 - dokploy/website
 - hypothesisworks/hypothesis
 - jdx/mise

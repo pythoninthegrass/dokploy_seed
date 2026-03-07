@@ -203,6 +203,8 @@ def build_build_type_payload(app_id: str, app_def: dict) -> dict:
         "buildType": build_type,
         "dockerContextPath": app_def.get("dockerContextPath", ""),
         "dockerBuildStage": app_def.get("dockerBuildStage", ""),
+        "herokuVersion": None,
+        "railpackVersion": None,
     }
     if build_type == "dockerfile":
         payload["dockerfile"] = app_def.get("dockerfile", "Dockerfile")
@@ -528,6 +530,7 @@ def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path)
     state = load_state(state_file)
     env_targets = cfg["project"].get("env_targets", [])
     env_file = repo_root / ".env"
+    apps_by_name = {a["name"]: a for a in cfg["apps"]}
 
     # Read and filter .env for env_targets
     if env_targets:
@@ -543,6 +546,7 @@ def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path)
 
         for name in env_targets:
             app_id = state["apps"][name]["applicationId"]
+            create_env_file = apps_by_name[name].get("create_env_file", False)
             print(f"Pushing env vars to {name}...")
             client.post(
                 "application.saveEnvironment",
@@ -551,6 +555,7 @@ def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path)
                     "env": filtered,
                     "buildArgs": None,
                     "buildSecrets": None,
+                    "createEnvFile": create_env_file,
                 },
             )
 
@@ -562,6 +567,7 @@ def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path)
         name = app_def["name"]
         resolved = resolve_refs(custom_env, state)
         app_id = state["apps"][name]["applicationId"]
+        create_env_file = app_def.get("create_env_file", False)
         print(f"Pushing custom env to {name}...")
         client.post(
             "application.saveEnvironment",
@@ -570,6 +576,7 @@ def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path)
                 "env": resolved,
                 "buildArgs": None,
                 "buildSecrets": None,
+                "createEnvFile": create_env_file,
             },
         )
 

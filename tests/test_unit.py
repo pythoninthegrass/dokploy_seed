@@ -299,6 +299,8 @@ class TestBuildBuildTypePayload:
             "dockerfile": "Dockerfile",
             "dockerContextPath": "",
             "dockerBuildStage": "",
+            "herokuVersion": None,
+            "railpackVersion": None,
         }
 
     def test_explicit_dockerfile(self):
@@ -330,6 +332,8 @@ class TestBuildBuildTypePayload:
             "isStaticSpa": False,
             "dockerContextPath": "",
             "dockerBuildStage": "",
+            "herokuVersion": None,
+            "railpackVersion": None,
         }
         assert "dockerfile" not in result
 
@@ -346,14 +350,18 @@ class TestBuildBuildTypePayload:
             "buildType": "nixpacks",
             "dockerContextPath": "",
             "dockerBuildStage": "",
+            "herokuVersion": None,
+            "railpackVersion": None,
         }
 
     def test_all_build_types_include_required_api_fields(self):
-        """Dokploy API requires dockerContextPath and dockerBuildStage for all build types."""
-        for build_type in ("dockerfile", "static", "nixpacks", "heroku"):
+        """Dokploy API requires dockerContextPath, dockerBuildStage, herokuVersion, railpackVersion for all build types."""
+        for build_type in ("dockerfile", "static", "nixpacks", "heroku_buildpacks"):
             result = dokploy.build_build_type_payload("app-1", {"name": "x", "buildType": build_type})
             assert "dockerContextPath" in result, f"missing dockerContextPath for {build_type}"
             assert "dockerBuildStage" in result, f"missing dockerBuildStage for {build_type}"
+            assert "herokuVersion" in result, f"missing herokuVersion for {build_type}"
+            assert "railpackVersion" in result, f"missing railpackVersion for {build_type}"
 
     def test_static_spa_included_when_true(self):
         """Static build with SPA=true passes isStaticSpa to the API."""

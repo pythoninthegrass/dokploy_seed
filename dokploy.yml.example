@@ -52,18 +52,19 @@ apps:
   - name: web
     source: github
     # Build settings (defaults shown)
-    buildType: dockerfile        # dockerfile | nixpacks | static | heroku | docker
-    dockerfile: Dockerfile       # Dockerfile path (buildType: dockerfile only)
+    buildType: dockerfile         # dockerfile | nixpacks | static | heroku_buildpacks | paketo_buildpacks | railpack
+    dockerfile: Dockerfile         # Dockerfile path (buildType: dockerfile only)
     # dockerContextPath: ""      # Docker build context (buildType: dockerfile only)
     # dockerBuildStage: ""       # Multi-stage target (buildType: dockerfile only)
     # publishDirectory: ""       # Output dir (buildType: static only)
     buildPath: /                 # Build path for GitHub provider
     triggerType: push            # push | manual
     autoDeploy: true             # Auto-deploy on push
-    # replicas: 1               # Number of replicas
+    # replicas: 1                # Number of replicas
     # watchPaths:                # File paths to watch for auto-deploy
     #   - "src/**"
     #   - Dockerfile
+    # create_env_file: false      # Write env vars to .env in container workdir
 
   - name: worker
     source: github

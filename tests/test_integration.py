@@ -527,6 +527,31 @@ class TestCmdEnv:
         payload = json.loads(env_route.calls[0].request.content)
         assert payload["applicationId"] == "app-1"
         assert "FOO=bar" in payload["env"]
+        assert payload["createEnvFile"] is False
+
+    def test_create_env_file_flag(self, tmp_path, minimal_config):
+        """Respects per-app create_env_file setting in saveEnvironment payload."""
+        minimal_config["project"]["env_targets"] = ["app"]
+        minimal_config["apps"][0]["create_env_file"] = True
+
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        (tmp_path / ".env").write_text("FOO=bar\n")
+
+        router = respx.Router()
+        env_route = router.post(f"{BASE_URL}/api/application.saveEnvironment").mock(return_value=httpx.Response(200, json={}))
+        client = _make_client(router)
+
+        dokploy.cmd_env(client, minimal_config, state_file, tmp_path)
+
+        payload = json.loads(env_route.calls[0].request.content)
+        assert payload["createEnvFile"] is True
 
     def test_missing_env_file(self, tmp_path, minimal_config):
         """Exits when .env file is missing and env_targets is set."""
@@ -580,6 +605,7 @@ class TestCmdEnv:
         # {redis} should resolve to redis appName
         assert "redis-gen" in payload["env"]
         assert "{redis}" not in payload["env"]
+        assert payload["createEnvFile"] is False
 
     def test_excluded_prefixes_filtered(self, tmp_path, minimal_config):
         """Env vars with excluded prefixes are filtered out."""

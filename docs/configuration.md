@@ -45,7 +45,7 @@ Per-environment overrides merged into the base config before any command runs.
 
 ### Overridable App Properties
 
-All per-app fields can be overridden per environment: `command`, `env`, `dockerImage`, `domain`, `buildType`, `dockerfile`, `dockerContextPath`, `dockerBuildStage`, `publishDirectory`, `autoDeploy`, `replicas`, `buildPath`, `triggerType`, `watchPaths`.
+All per-app fields can be overridden per environment: `command`, `env`, `dockerImage`, `domain`, `buildType`, `dockerfile`, `dockerContextPath`, `dockerBuildStage`, `publishDirectory`, `autoDeploy`, `replicas`, `buildPath`, `triggerType`, `watchPaths`, `create_env_file`.
 
 ### Merging Semantics
 
@@ -63,7 +63,7 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | `apps[].command` | no | Command override, supports `{app_name}` refs |
 | `apps[].env` | no | Per-app env vars (not the project `.env`), supports `{app_name}` refs |
 | `apps[].domain` | no | Single domain object or list of domain objects |
-| `apps[].buildType` | no | Build type: `dockerfile` (default), `nixpacks`, `static`, `heroku`, `docker` |
+| `apps[].buildType` | no | Build type: `dockerfile` (default), `nixpacks`, `static`, `heroku_buildpacks`, `paketo_buildpacks`, `railpack` |
 | `apps[].dockerfile` | no | Dockerfile path (default: `Dockerfile`, for `buildType: dockerfile`) |
 | `apps[].dockerContextPath` | no | Docker build context path (for `buildType: dockerfile`) |
 | `apps[].dockerBuildStage` | no | Docker build target stage (for `buildType: dockerfile`) |
@@ -73,6 +73,7 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | `apps[].buildPath` | no | Build path for GitHub provider (default: `/`) |
 | `apps[].triggerType` | no | GitHub trigger type: `push` (default) or `manual` |
 | `apps[].watchPaths` | no | File paths to watch for auto-deploy triggers (list of strings) |
+| `apps[].create_env_file` | no | Write env vars to a `.env` file in the container working directory (default: `false`) |
 
 ### Domain Object
 

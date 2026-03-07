@@ -16,7 +16,7 @@ Requires the `x-api-key` header.
 
 - **`saveGithubProvider`**: `repository` is the repo name only (e.g. `my-repo`), not `owner/repo` — Dokploy prepends the `owner` automatically.
 
-- **`saveBuildType`**: `dockerfile`, `dockerContextPath`, and `dockerBuildStage` must be explicit strings (not `null`) — use `"Dockerfile"`, `""`, `""` respectively. Passing `null` causes Dokploy to use the clone directory name as the Dockerfile path.
+- **`saveBuildType`**: `dockerfile`, `dockerContextPath`, and `dockerBuildStage` must be explicit strings (not `null`) — use `"Dockerfile"`, `""`, `""` respectively. Passing `null` causes Dokploy to use the clone directory name as the Dockerfile path. As of v0.28.4, `herokuVersion` and `railpackVersion` are also required (send `null` when not applicable). The OpenAPI spec marks them as nullable but the Zod validator rejects missing fields. The `buildType` enum values are: `dockerfile`, `nixpacks`, `static`, `heroku_buildpacks`, `paketo_buildpacks`, `railpack`.
 
 - **`github.getGithubRepositories`**: GET with `?githubId=<id>`. Returns list of GitHub
   repo objects. Each repo has `owner.login` — used to auto-select the correct provider
@@ -26,7 +26,9 @@ Requires the `x-api-key` header.
 
 - **`application.saveBuildType`** is a separate endpoint from `application.update` — build type configuration cannot be set via the general update endpoint.
 
-- **`application.deploy`** returns an empty response body on success.
+- **`application.saveEnvironment`**: `createEnvFile` (boolean) became a required field in Dokploy v0.28.4 (added in v0.26.1 as optional, promoted to required later). Controls whether env vars are written to a `.env` file in the container's working directory. Set `false` to preserve pre-v0.26.1 behavior (env vars injected as process environment only).
+
+- **`application.deploy`** returns an empty response body on success. Since v0.26.2, deployments execute asynchronously in the background — the endpoint returns immediately.
 
 - **`project.create`** returns a nested structure: `{"project": {...}, "environment": {...}}`.
 
