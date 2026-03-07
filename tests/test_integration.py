@@ -15,6 +15,8 @@ _spec = importlib.util.spec_from_file_location("dokploy", _SCRIPT)
 dokploy = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dokploy)
 
+pytestmark = pytest.mark.integration
+
 BASE_URL = "https://dokploy.test"
 API_KEY = "test-api-key-123"
 

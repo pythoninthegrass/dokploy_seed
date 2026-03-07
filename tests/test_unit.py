@@ -13,6 +13,8 @@ _spec = importlib.util.spec_from_file_location("dokploy", _SCRIPT)
 dokploy = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dokploy)
 
+pytestmark = pytest.mark.unit
+
 
 class TestFindRepoRoot:
     def test_finds_repo_root(self, tmp_path, monkeypatch):

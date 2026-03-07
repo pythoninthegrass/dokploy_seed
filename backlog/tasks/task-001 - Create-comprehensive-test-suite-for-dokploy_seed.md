@@ -1,10 +1,10 @@
 ---
 id: TASK-001
 title: Create comprehensive test suite for dokploy_seed
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-06 08:11'
-updated_date: '2026-03-06 08:16'
+updated_date: '2026-03-07 01:42'
 labels:
   - testing
   - infrastructure
@@ -46,9 +46,9 @@ Currently there are zero automated tests in the repo.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All four testing layers (unit, integration, e2e, property-based) have at least one passing test
-- [ ] #2 pytest runs successfully with `uv run pytest` or equivalent
-- [ ] #3 Test configuration is defined (pyproject.toml or conftest.py)
-- [ ] #4 CI-compatible: tests can be run headlessly on a Linux host
-- [ ] #5 Code coverage reporting is configured (pytest-cov)
+- [x] #1 All four testing layers (unit, integration, e2e, property-based) have at least one passing test
+- [x] #2 pytest runs successfully with `uv run pytest` or equivalent
+- [x] #3 Test configuration is defined (pyproject.toml or conftest.py)
+- [x] #4 CI-compatible: tests can be run headlessly on a Linux host
+- [x] #5 Code coverage reporting is configured (pytest-cov)
 <!-- AC:END -->
