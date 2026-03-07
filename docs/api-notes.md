@@ -18,6 +18,10 @@ Requires the `x-api-key` header.
 
 - **`saveBuildType`**: `dockerfile`, `dockerContextPath`, and `dockerBuildStage` must be explicit strings (not `null`) — use `"Dockerfile"`, `""`, `""` respectively. Passing `null` causes Dokploy to use the clone directory name as the Dockerfile path.
 
+- **`github.getGithubRepositories`**: GET with `?githubId=<id>`. Returns list of GitHub
+  repo objects. Each repo has `owner.login` — used to auto-select the correct provider
+  when multiple GitHub providers are configured.
+
 - **`project.remove`** (not `project.delete`) is the correct endpoint for project deletion.
 
 - **`application.saveBuildType`** is a separate endpoint from `application.update` — build type configuration cannot be set via the general update endpoint.
@@ -25,6 +29,17 @@ Requires the `x-api-key` header.
 - **`application.deploy`** returns an empty response body on success.
 
 - **`project.create`** returns a nested structure: `{"project": {...}, "environment": {...}}`.
+
+## Known Server-Side Issues
+
+- **Stale Traefik configs after project destroy**: `project.remove` deletes the
+  project and its applications from the Dokploy database but does not remove the
+  corresponding Traefik dynamic config files from `/etc/dokploy/traefik/dynamic/`.
+  Repeated destroy/recreate cycles accumulate orphaned `<appName>.yml` files, all
+  with identical routing rules. Traefik round-robins across dead services, causing
+  502 errors. **Workaround**: manually delete stale `.yml` files from the dynamic
+  config directory. Traefik watches the directory and picks up removals without a
+  restart.
 
 ## Health Check / Pre-flight
 

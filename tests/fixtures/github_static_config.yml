@@ -21,9 +21,6 @@ environments:
           port: 80
           https: true
           certificateType: letsencrypt
-          path: /docs
-          internalPath: /
-          stripPath: false
         autoDeploy: true
         replicas: 2
 
@@ -31,7 +28,7 @@ apps:
   - name: app
     source: github
     buildType: static
-    publishDirectory: dist
+    publishDirectory: docs
     isStaticSpa: true
     buildPath: /
     triggerType: push

@@ -179,6 +179,22 @@ def build_github_provider_payload(app_id: str, app_def: dict, github_cfg: dict, 
     }
 
 
+def resolve_github_provider(client: "DokployClient", providers: list[dict], owner: str) -> str:
+    """Find the GitHub provider that has access to repos owned by `owner`."""
+    for p in providers:
+        gid = p["githubId"]
+        repos = client.get("github.getGithubRepositories", params={"githubId": gid})
+        owners = {r["owner"]["login"] for r in repos}
+        if owner in owners:
+            return gid
+    available = [p["githubId"] for p in providers]
+    raise SystemExit(
+        f"ERROR: No GitHub provider has access to owner '{owner}'.\n"
+        f"  Available providers: {available}\n"
+        f"  Configure access in Dokploy UI."
+    )
+
+
 def build_build_type_payload(app_id: str, app_def: dict) -> dict:
     """Build payload for application.saveBuildType."""
     build_type = app_def.get("buildType", "dockerfile")
@@ -412,7 +428,7 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
         if not providers:
             print("ERROR: No GitHub provider found. Configure one in Dokploy UI first.")
             sys.exit(1)
-        github_id = providers[0]["githubId"]
+        github_id = resolve_github_provider(client, providers, github_cfg["owner"])
         print(f"  GitHub ID: {github_id}")
 
     state: dict = {

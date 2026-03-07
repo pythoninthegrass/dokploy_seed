@@ -465,13 +465,14 @@ class TestMergeEnvOverridesNewFields:
         # Base has replicas=1, prod override has replicas=2
         assert app["replicas"] == 2
 
-    def test_domain_path_in_override(self, github_static_config):
-        """Environment domain override with path/internalPath/stripPath merges."""
+    def test_domain_override_merges(self, github_static_config):
+        """Environment domain override merges into app."""
         merged = dokploy.merge_env_overrides(github_static_config, "prod")
         app = next(a for a in merged["apps"] if a["name"] == "app")
-        assert app["domain"]["path"] == "/docs"
-        assert app["domain"]["internalPath"] == "/"
-        assert app["domain"]["stripPath"] is False
+        assert app["domain"]["host"] == "dev.fuckfortyseven.org"
+        assert app["domain"]["port"] == 80
+        assert app["domain"]["https"] is True
+        assert "path" not in app["domain"]
 
     def test_base_build_type_preserved(self, github_static_config):
         """buildType from base config is preserved when not overridden."""

@@ -238,6 +238,7 @@ def _setup_router(
     router: respx.Router,
     *,
     with_github: bool = False,
+    github_owner: str = "",
     app_names: list[str] | None = None,
 ) -> dict:
     """Wire up standard mock routes for cmd_setup and return expected IDs."""
@@ -262,10 +263,16 @@ def _setup_router(
         )
     )
 
-    # github.githubProviders
+    # github.githubProviders + getGithubRepositories
     if with_github:
         router.get(f"{BASE_URL}/api/github.githubProviders").mock(
             return_value=httpx.Response(200, json=[{"githubId": ids["githubId"]}])
+        )
+        router.get(f"{BASE_URL}/api/github.getGithubRepositories").mock(
+            return_value=httpx.Response(
+                200,
+                json=[{"owner": {"login": github_owner}, "name": "test-repo"}],
+            )
         )
 
     # application.create — side_effect to return different IDs per app
@@ -317,6 +324,7 @@ class TestCmdSetup:
         ids = _setup_router(
             router,
             with_github=True,
+            github_owner="your-org",
             app_names=["redis", "web", "worker", "beat", "flower"],
         )
         client = _make_client(router)
@@ -414,6 +422,12 @@ class TestCmdSetup:
             )
         )
         router.get(f"{BASE_URL}/api/github.githubProviders").mock(return_value=httpx.Response(200, json=[{"githubId": "gh-1"}]))
+        router.get(f"{BASE_URL}/api/github.getGithubRepositories").mock(
+            return_value=httpx.Response(
+                200,
+                json=[{"owner": {"login": "your-org"}, "name": "your-app"}],
+            )
+        )
 
         app_n = {"n": 0}
 
@@ -447,6 +461,33 @@ class TestCmdSetup:
             assert payload["repository"] == "your-app"
             assert "/" not in payload["repository"]
             assert payload["owner"] == "your-org"
+
+    def test_github_provider_mismatch_exits(self, tmp_path, web_app_config):
+        """Exits with error when no GitHub provider matches the configured owner."""
+        router = respx.Router()
+        router.post(f"{BASE_URL}/api/project.create").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "project": {"projectId": "proj-1"},
+                    "environment": {"environmentId": "env-1"},
+                },
+            )
+        )
+        router.get(f"{BASE_URL}/api/github.githubProviders").mock(
+            return_value=httpx.Response(200, json=[{"githubId": "gh-wrong"}])
+        )
+        router.get(f"{BASE_URL}/api/github.getGithubRepositories").mock(
+            return_value=httpx.Response(
+                200,
+                json=[{"owner": {"login": "different-org"}, "name": "some-repo"}],
+            )
+        )
+        client = _make_client(router)
+
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        with pytest.raises(SystemExit, match="No GitHub provider"):
+            dokploy.cmd_setup(client, web_app_config, state_file)
 
 
 # ---------------------------------------------------------------------------
@@ -740,7 +781,7 @@ class TestFullPipeline:
         (repo_root / ".env").write_text("APP_KEY=secret123\nDATABASE_URL=postgres://localhost\n")
 
         router = respx.Router()
-        ids = _setup_router(router, with_github=True)
+        ids = _setup_router(router, with_github=True, github_owner="your-org")
 
         # Additional routes for env, deploy, status, destroy
         router.post(f"{BASE_URL}/api/application.saveEnvironment").mock(return_value=httpx.Response(200, json={}))
@@ -911,3 +952,68 @@ class TestCmdImport:
         state_file = tmp_path / ".dokploy-state" / "test.json"
         with pytest.raises(SystemExit):
             dokploy.cmd_import(client, minimal_config, state_file)
+
+
+# ---------------------------------------------------------------------------
+# resolve_github_provider tests
+# ---------------------------------------------------------------------------
+
+
+class TestResolveGithubProvider:
+    def test_selects_matching_provider(self):
+        """Picks the provider whose repos include the configured owner."""
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/github.getGithubRepositories").mock(
+            side_effect=lambda request: httpx.Response(
+                200,
+                json=[{"owner": {"login": "wrong-org"}, "name": "repo-a"}],
+            )
+            if request.url.params.get("githubId") == "gh-wrong"
+            else httpx.Response(
+                200,
+                json=[{"owner": {"login": "my-org"}, "name": "repo-b"}],
+            )
+        )
+        client = _make_client(router)
+
+        providers = [
+            {"githubId": "gh-wrong"},
+            {"githubId": "gh-right"},
+        ]
+        result = dokploy.resolve_github_provider(client, providers, "my-org")
+        assert result == "gh-right"
+
+    def test_raises_when_no_provider_matches(self):
+        """Exits with clear error when no provider has repos for the owner."""
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/github.getGithubRepositories").mock(
+            return_value=httpx.Response(
+                200,
+                json=[{"owner": {"login": "other-org"}, "name": "repo-x"}],
+            )
+        )
+        client = _make_client(router)
+
+        providers = [{"githubId": "gh-1"}, {"githubId": "gh-2"}]
+        with pytest.raises(SystemExit, match="No GitHub provider"):
+            dokploy.resolve_github_provider(client, providers, "target-org")
+
+    def test_first_match_wins(self):
+        """Returns the first provider that matches, not scanning further."""
+        call_count = {"n": 0}
+
+        def _mock_repos(request):
+            call_count["n"] += 1
+            return httpx.Response(
+                200,
+                json=[{"owner": {"login": "my-org"}, "name": "repo"}],
+            )
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/github.getGithubRepositories").mock(side_effect=_mock_repos)
+        client = _make_client(router)
+
+        providers = [{"githubId": "gh-1"}, {"githubId": "gh-2"}]
+        result = dokploy.resolve_github_provider(client, providers, "my-org")
+        assert result == "gh-1"
+        assert call_count["n"] == 1
