@@ -19,6 +19,7 @@
       "Bash(ln:*)",
       "Bash(ls:*)",
       "Bash(lsof:*)",
+      "Bash(markdownlint:*)",
       "Bash(prek:*)",
       "Bash(pytest:*)",
       "Bash(python:*)",

@@ -24,10 +24,28 @@ Deployment script for [Dokploy](https://dokploy.com). Define your project's apps
 ## Prerequisites
 
 * A running [Dokploy](https://dokploy.com) instance
-* [uv](https://docs.astral.sh/uv/) (the script runs as a [PEP 723](https://peps.python.org/pep-0723/) inline script via `uv run --script`)
+* [uv](https://docs.astral.sh/uv/) — for `uv tool install` (recommended) or `uv run --script` (standalone)
 * A Dokploy API key (generated in Dokploy UI > Settings > API)
 
 ## Quick Start
+
+### Option A: Install as a CLI tool (recommended)
+
+```bash
+uv tool install git+https://github.com/pythoninthegrass/dokploy_seed
+```
+
+Then from any directory containing a `dokploy.yml`:
+
+```bash
+dps --env prod setup     # Create project + apps + providers + domains
+dps --env prod env       # Push filtered .env to env_targets + per-app env
+dps --env prod deploy    # Deploy apps in wave order
+dps --env prod status    # Show status of all apps
+dps --env prod destroy   # Delete project + all apps
+```
+
+### Option B: Use as a template repo
 
 1. Click **Use this template** > **Create a new repository** at the top of this page (or use the [GitHub CLI](#creating-from-the-command-line)).
 
@@ -75,14 +93,15 @@ The `--env` flag is optional and defaults to `dev`. It can also be set via the `
 
 ```bash
 # Explicit flag (highest priority)
+dps --env prod status
 uv run --script dokploy.py --env prod status
 
 # Via environment variable
 export DOKPLOY_ENV=prod
-uv run --script dokploy.py status
+dps status
 
 # No flag, no variable → defaults to 'dev'
-uv run --script dokploy.py status
+dps status
 ```
 
 Resolution order: `--env` flag > `DOKPLOY_ENV` (from `.env` or environment) > `dev`.
@@ -122,7 +141,7 @@ The `environments.<env>` section is merged into the base config before any comma
 <details>
 <summary><strong>Config File Discovery</strong></summary>
 
-The script walks upward from its own location looking for `dokploy.yml`. This means it works whether placed at the repo root or in a `scripts/` subdirectory.
+The script walks upward from the current working directory looking for `dokploy.yml`. This works whether invoked via `dps` (from any directory) or `uv run --script dokploy.py` (from the repo).
 
 </details>
 <!-- markdownlint-enable MD033 -->
@@ -150,9 +169,17 @@ See the `examples/` directory:
 
 ## Adding to an Existing Project
 
-If you already have a repo and prefer to copy the files instead of using the template:
+**Easiest**: Install the CLI globally and use it from your project directory:
 
-1. Copy `dokploy.py` to your repo root (or `scripts/`)
+```bash
+uv tool install git+https://github.com/pythoninthegrass/dokploy_seed
+```
+
+Then create a `dokploy.yml` in your project (see `dokploy.yml.example`), add `.dokploy-state/` (with `.gitkeep`), set `DOKPLOY_URL` and `DOKPLOY_API_KEY` in `.env`, and run `dps --env prod setup`.
+
+**Alternative**: Copy the files directly:
+
+1. Copy `dokploy.py` to your repo root
 2. Create `dokploy.yml` based on `dokploy.yml.example` (schema is fetched from GitHub automatically)
 3. Create `.dokploy-state/` directory (add a `.gitkeep`)
 4. Add `DOKPLOY_URL` and `DOKPLOY_API_KEY` to your `.env`

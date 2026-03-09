@@ -2,18 +2,21 @@
 
 ## Project Overview
 
-`dokploy_seed` — a standalone, config-driven deployment script for [Dokploy](https://dokploy.com). Designed to be copied into any project repo. Define apps, domains, deploy order, and environment overrides in `dokploy.yml`; the script handles all Dokploy API calls.
+`dokploy_seed` — a standalone, config-driven deployment script for [Dokploy](https://dokploy.com). Installable via `uv tool install` or copied directly into any project repo. Define apps, domains, deploy order, and environment overrides in `dokploy.yml`; the script handles all Dokploy API calls.
 
 ## Tech Stack
 
-- **Python 3.13** (PEP 723 inline script — no `pyproject.toml`, no virtualenv)
-- **uv** for script execution (`uv run --script`)
+- **Python 3.13** — dual-mode: PEP 723 inline script (`uv run --script`) or installable package (`uv tool install`)
+- **uv** for script execution and tool installation
+- **uv_build** backend for `pyproject.toml`-based packaging
 - Dependencies: `httpx`, `python-decouple`, `pyyaml`
 
 ## Project Structure
 
 ```text
-dokploy.py                  # The deployment script (top-level)
+dokploy.py                  # The deployment script (top-level, PEP 723)
+pyproject.toml              # Package metadata, entry point, build config
+src/dokploy_seed/           # Package for uv tool install (symlinks to dokploy.py)
 dokploy.yml.example         # Annotated starter config
 schemas/dokploy.schema.json # JSON Schema for dokploy.yml
 .dokploy-state/             # State files (resource IDs, committed)
@@ -26,13 +29,17 @@ tests/                      # Pytest suite (see docs/testing.md)
 ## Key Commands
 
 ```bash
-uv run --script dokploy.py --help                       # Show usage
-uv run --script dokploy.py check                        # Pre-flight checks
-uv run --script dokploy.py --env prod setup             # Create project
-uv run --script dokploy.py --env prod env               # Push env vars
-uv run --script dokploy.py --env prod deploy            # Deploy apps
-uv run --script dokploy.py --env prod status            # Check status
-uv run --script dokploy.py --env prod destroy           # Tear down
+# Via uv tool install (global CLI)
+dps --help                                               # Show usage
+dps check                                                # Pre-flight checks
+dps --env prod setup                                     # Create project
+dps --env prod deploy                                    # Deploy apps
+dps --env prod status                                    # Check status
+
+# Via uv run --script (standalone, no install)
+uv run --script dokploy.py --help                        # Show usage
+uv run --script dokploy.py --env prod setup              # Create project
+uv run --script dokploy.py --env prod deploy             # Deploy apps
 ```
 
 ## Testing

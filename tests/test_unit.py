@@ -18,17 +18,16 @@ pytestmark = pytest.mark.unit
 
 class TestFindRepoRoot:
     def test_finds_repo_root(self, tmp_path, monkeypatch):
-        """find_repo_root walks up and returns the dir containing dokploy.yml."""
+        """find_repo_root walks up from cwd and returns the dir containing dokploy.yml."""
         (tmp_path / "dokploy.yml").write_text("project: {}")
         sub = tmp_path / "a" / "b"
         sub.mkdir(parents=True)
-        # Make the function think the script lives in sub/
-        monkeypatch.setattr(dokploy, "__file__", str(sub / "dokploy.py"))
+        monkeypatch.chdir(sub)
         assert dokploy.find_repo_root() == tmp_path
 
     def test_exits_when_not_found(self, tmp_path, monkeypatch):
         """find_repo_root exits when no dokploy.yml is found."""
-        monkeypatch.setattr(dokploy, "__file__", str(tmp_path / "dokploy.py"))
+        monkeypatch.chdir(tmp_path)
         with pytest.raises(SystemExit):
             dokploy.find_repo_root()
 

@@ -31,13 +31,24 @@ import json
 import re
 import sys
 import yaml
-from decouple import config
+from decouple import Config, RepositoryEmpty, RepositoryEnv
 from pathlib import Path
 
 
+def _build_config() -> Config:
+    """Build a decouple Config that reads .env from cwd (not from __file__)."""
+    env_file = Path.cwd() / ".env"
+    if env_file.is_file():
+        return Config(RepositoryEnv(str(env_file)))
+    return Config(RepositoryEmpty())
+
+
+config = _build_config()
+
+
 def find_repo_root() -> Path:
-    """Walk up from the script's directory looking for dokploy.yml."""
-    current = Path(__file__).resolve().parent
+    """Walk up from the current working directory looking for dokploy.yml."""
+    current = Path.cwd()
     while True:
         if (current / "dokploy.yml").exists():
             return current
@@ -711,7 +722,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "check":
-        cmd_check(Path(__file__).resolve().parent)
+        cmd_check(Path.cwd())
         return
 
     env_name = args.env or config("DOKPLOY_ENV", default="dev")
