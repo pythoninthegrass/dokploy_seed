@@ -110,13 +110,13 @@ This project uses Backlog.md MCP for all task and project management.
 
 ### Key MCP Commands
 
-| Command | Purpose |
-|---------|---------|
-| `task_create` | Create a new task (status defaults to "To Do") |
-| `task_edit` | Edit metadata, check ACs, update notes, change status |
-| `task_view` | View full task details |
-| `task_search` | Find tasks by keyword |
-| `task_list` | List tasks with optional filters |
+| Command         | Purpose                                                                             |
+| --------------- | ----------------------------------------------------------------------------------- |
+| `task_create`   | Create a new task (status defaults to "To Do")                                      |
+| `task_edit`     | Edit metadata, check ACs, update notes, change status                               |
+| `task_view`     | View full task details                                                              |
+| `task_search`   | Find tasks by keyword                                                               |
+| `task_list`     | List tasks with optional filters                                                    |
 | `task_complete` | **Moves task to `backlog/completed/`** — only use for cleanup, not for marking done |
 
 ### Task Lifecycle
