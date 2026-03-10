@@ -705,10 +705,15 @@ def main() -> None:
     )
     parser.add_argument(
         "command",
+        nargs="?",
+        default=None,
         choices=["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"],
         help="Command to run",
     )
     args = parser.parse_args()
+    if args.command is None:
+        parser.print_help()
+        return
 
     if args.command == "check":
         cmd_check(Path.cwd())
