@@ -103,8 +103,13 @@ Resolution happens during `setup` (for commands) and `env` (for environment vari
 | `DOKPLOY_API_KEY` | yes | — | API key for authentication |
 | `DOKPLOY_ENV` | no | `dev` | Target environment (alternative to `--env` flag) |
 | `ENV_EXCLUDE_PREFIXES` | no | — | Extra env var prefixes to exclude when pushing `.env` |
+| `DOKPLOY_SSH_HOST` | for logs/exec | — | SSH host for Docker access (IP or hostname) |
+| `DOKPLOY_SSH_USER` | no | `root` | SSH user for Docker access |
+| `DOKPLOY_SSH_PORT` | no | `22` | SSH port for Docker access |
 
 Resolution order: `--env` flag > `DOKPLOY_ENV` (from `.env` or environment) > `dev`.
+
+The `DOKPLOY_SSH_*` variables are only required for the `logs` and `exec` commands, which connect to the Docker daemon on the Dokploy host via SSH.
 
 ## Schema Directive
 

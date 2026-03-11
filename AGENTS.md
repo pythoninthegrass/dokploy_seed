@@ -8,7 +8,7 @@
 
 - **Python 3.13** — dual-mode: PEP 723 inline script (`main.py`) + `uv_build` packaging for tool install
 - **uv** for execution (`uv run --script`) and distribution (`uv tool install`)
-- Dependencies: `httpx`, `python-decouple`, `pyyaml`
+- Dependencies: `docker[ssh]`, `httpx`, `python-decouple`, `pyyaml`
 
 ## Project Structure
 
@@ -39,6 +39,12 @@ dps --env prod env                        # Push env vars
 dps --env prod deploy                     # Deploy apps
 dps --env prod status                     # Check status
 dps --env prod destroy                    # Tear down
+dps --env prod logs django                # Tail 100 lines of container logs
+dps --env prod logs django -f             # Follow log output
+dps --env prod logs django -n 500         # Last 500 lines
+dps --env prod logs django --exited       # Pick from exited containers
+dps --env prod exec django                # Interactive shell (sh)
+dps --env prod exec django -- python manage.py shell  # Run command
 ```
 
 ### Standalone (no install)
@@ -85,6 +91,23 @@ If you skip this, `wt remove` deletes your CWD and **every subsequent Bash call 
 
 Shell integration (`wt` as a shell function) does NOT help here because each Bash tool call is an independent shell — the `cd` side-effect cannot persist.
 
+## Ad-hoc API Calls
+
+Query the live Dokploy API from a local `.env` file:
+
+```bash
+curl -s -H "x-api-key: $(rg '^DOKPLOY_API_KEY=' .env | cut -d= -f2)" \
+  "$(rg '^DOKPLOY_URL=' .env | cut -d= -f2)/api/<endpoint>" | jq .
+```
+
+Example — list all API paths:
+
+```bash
+curl -s -H "x-api-key: $(rg '^DOKPLOY_API_KEY=' .env | cut -d= -f2)" \
+  "$(rg '^DOKPLOY_URL=' .env | cut -d= -f2)/api/settings.getOpenApiDocument" \
+  | jq '.paths | keys[]'
+```
+
 ## Context7
 
 Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
@@ -93,6 +116,7 @@ Always use Context7 MCP when I need library/API documentation, code generation, 
 
 - astral-sh/uv
 - astral-sh/ruff
+- docker/docker-py
 - dokploy/website
 - hypothesisworks/hypothesis
 - jdx/mise

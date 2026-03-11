@@ -43,6 +43,24 @@ Requires the `x-api-key` header.
   config directory. Traefik watches the directory and picks up removals without a
   restart.
 
+## Container & Log Access
+
+The Dokploy REST API does **not** expose a container logs endpoint. The UI uses WebSocket/tRPC subscriptions for real-time log streaming, which is not available via the REST API.
+
+Instead, the `logs` and `exec` commands use `docker-py` with SSH transport (`ssh://user@host`) to connect to the Docker daemon on the Dokploy host directly. Container IDs are resolved via the REST API, then docker-py fetches logs or runs exec against those containers.
+
+### Endpoints Used
+
+- **`docker.getContainersByAppNameMatch`**: GET with `?appName=<appName>`. Returns a list of containers (running + exited) matching the Dokploy-assigned appName. Each entry has `containerId`, `name`, and `state` (`running`, `exited`, `created`).
+
+- **`docker.getContainersByAppLabel`**: GET with `?appName=<appName>&type=standalone|swarm`. Similar to above but filters by deployment type label.
+
+- **`docker.getServiceContainersByAppName`**: GET with `?appName=<appName>&serviceName=<service>`. Returns containers for a specific service within a compose/stack app.
+
+### SSH Transport
+
+`docker-py` with `use_ssh_client=True` spawns `ssh -- <host> docker system dial-stdio` as a subprocess, piping the Docker API through the user's local SSH binary. This uses existing SSH config, keys, and known_hosts.
+
 ## Health Check / Pre-flight
 
 The `check` command uses `GET /api/project.all` to validate the API key.

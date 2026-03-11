@@ -3,6 +3,7 @@
 # /// script
 # requires-python = ">=3.13,<3.14"
 # dependencies = [
+#     "docker[ssh]>=7.0",
 #     "httpx>=0.28.1,<1",
 #     "python-decouple>=3.8",
 #     "pyyaml>=6.0",
@@ -20,12 +21,16 @@ Dokploy deployment script — config-driven via dokploy.yml.
 Usage:
     dps check
     dps --env <environment> <setup|env|deploy|status|destroy>
+    dps --env <environment> logs [app] [-f] [-n TAIL] [--exited]
+    dps --env <environment> exec [app] [--exited] [-- command...]
 
 Environment can also be set via DOKPLOY_ENV env var.
+SSH commands (logs, exec) require DOKPLOY_SSH_HOST in .env.
 """
 
 import argparse
 import copy
+import docker
 import httpx
 import json
 import re
@@ -635,6 +640,152 @@ def cmd_status(client: DokployClient, state_file: Path) -> None:
         print(f"  {name:10s}  {status}")
 
 
+def get_ssh_config() -> dict:
+    """Read SSH connection settings from environment."""
+    host: str = config("DOKPLOY_SSH_HOST", default="")  # type: ignore[assignment]
+    if not host:
+        print("ERROR: DOKPLOY_SSH_HOST is required for exec/logs commands.")
+        print("  Set it in .env or as an environment variable.")
+        sys.exit(1)
+    user: str = config("DOKPLOY_SSH_USER", default="root")  # type: ignore[assignment]
+    port: str = config("DOKPLOY_SSH_PORT", default="22")  # type: ignore[assignment]
+    return {"host": host, "user": user, "port": int(port)}
+
+
+def build_docker_url(ssh_cfg: dict) -> str:
+    """Build an ssh:// URL for docker-py from SSH config."""
+    user = ssh_cfg.get("user", "root")
+    host = ssh_cfg["host"]
+    port = ssh_cfg.get("port", 22)
+    if port != 22:
+        return f"ssh://{user}@{host}:{port}"
+    return f"ssh://{user}@{host}"
+
+
+def get_docker_client(ssh_cfg: dict) -> docker.DockerClient:
+    """Create a Docker client connected via SSH."""
+    url = build_docker_url(ssh_cfg)
+    return docker.DockerClient(base_url=url, use_ssh_client=True)
+
+
+def get_containers(client: DokployClient, app_name: str) -> list[dict]:
+    """Fetch containers for an app via the Dokploy API."""
+    return client.get(
+        "docker.getContainersByAppNameMatch",
+        params={"appName": app_name},
+    )
+
+
+def resolve_app_for_exec(state: dict, app_name: str | None) -> str:
+    """Resolve an app name argument to a Dokploy appName from state.
+
+    If app_name is None and only one app exists, auto-selects it.
+    """
+    apps = state["apps"]
+    if app_name is None:
+        if len(apps) == 1:
+            return next(iter(apps.values()))["appName"]
+        names = ", ".join(sorted(apps.keys()))
+        print(f"ERROR: Multiple apps found — specify an app: {names}")
+        sys.exit(1)
+    if app_name not in apps:
+        names = ", ".join(sorted(apps.keys()))
+        print(f"ERROR: Unknown app '{app_name}'. Available: {names}")
+        sys.exit(1)
+    return apps[app_name]["appName"]
+
+
+def select_container(containers: list[dict], exited: bool, for_exec: bool = False) -> dict:
+    """Pick a container from the list.
+
+    Default: return the most recent active container (for logs) or running container (for exec).
+    With exited=True: show a numbered list and prompt for selection.
+    """
+    if not containers:
+        print("ERROR: No containers found for this app.")
+        sys.exit(1)
+
+    if exited:
+        for i, c in enumerate(containers, 1):
+            print(f"  {i}) {c['name']}  ({c['containerId'][:12]})  [{c['state']}]")
+        while True:
+            try:
+                choice = int(input("Select container: "))
+                if 1 <= choice <= len(containers):
+                    return containers[choice - 1]
+            except (ValueError, EOFError):
+                pass
+            print(f"  Enter a number between 1 and {len(containers)}.")
+    elif for_exec:
+        running = [c for c in containers if c["state"] == "running"]
+        if not running:
+            print("ERROR: No running container found. Use --exited to pick from exited containers.")
+            sys.exit(1)
+        return running[0]
+    else:
+        return containers[0]
+
+
+def cmd_logs(client: DokployClient, state_file: Path, app: str | None, follow: bool, tail: int, exited: bool) -> None:
+    """Fetch container logs via docker-py over SSH."""
+    state = load_state(state_file)
+    dokploy_name = resolve_app_for_exec(state, app)
+    ssh_cfg = get_ssh_config()
+
+    containers = get_containers(client, dokploy_name)
+    container_info = select_container(containers, exited=exited)
+    print(
+        f"Container: {container_info['name']} ({container_info['containerId'][:12]}) [{container_info['state']}]",
+        file=sys.stderr,
+    )
+
+    docker_client = get_docker_client(ssh_cfg)
+    try:
+        container = docker_client.containers.get(container_info["containerId"])
+        tail_arg = tail if tail > 0 else "all"
+        if follow:
+            for chunk in container.logs(stream=True, follow=True, tail=tail_arg):
+                sys.stdout.buffer.write(chunk)
+                sys.stdout.buffer.flush()
+        else:
+            output = container.logs(tail=tail_arg)
+            sys.stdout.buffer.write(output)
+            sys.stdout.buffer.flush()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        docker_client.close()
+
+
+def cmd_exec(client: DokployClient, state_file: Path, app: str | None, exited: bool, command: list[str] | None) -> None:
+    """Execute a command in a container via docker-py over SSH."""
+    state = load_state(state_file)
+    dokploy_name = resolve_app_for_exec(state, app)
+    ssh_cfg = get_ssh_config()
+
+    containers = get_containers(client, dokploy_name)
+    container_info = select_container(containers, exited=exited, for_exec=True)
+    print(
+        f"Container: {container_info['name']} ({container_info['containerId'][:12]}) [{container_info['state']}]",
+        file=sys.stderr,
+    )
+
+    docker_client = get_docker_client(ssh_cfg)
+    try:
+        container = docker_client.containers.get(container_info["containerId"])
+        cmd = command if command else ["sh"]
+        exit_code, output = container.exec_run(cmd, stdin=True, tty=True, demux=True)
+        if output:
+            stdout_data, stderr_data = output
+            if stdout_data:
+                sys.stdout.buffer.write(stdout_data)
+            if stderr_data:
+                sys.stderr.buffer.write(stderr_data)
+        sys.exit(exit_code)
+    finally:
+        docker_client.close()
+
+
 def cmd_destroy(client: DokployClient, state_file: Path) -> None:
     state = load_state(state_file)
 
@@ -712,13 +863,28 @@ def main() -> None:
         default=None,
         help="Target environment (default: DOKPLOY_ENV from .env, or 'dev')",
     )
-    parser.add_argument(
-        "command",
-        nargs="?",
-        default=None,
-        choices=["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"],
-        help="Command to run",
-    )
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("check", help="Pre-flight checks")
+    sub.add_parser("setup", help="Create project + apps")
+    sub.add_parser("env", help="Push environment variables")
+    sub.add_parser("deploy", help="Full pipeline: check, setup, env, trigger")
+    sub.add_parser("trigger", help="Deploy apps in wave order")
+    sub.add_parser("status", help="Show deployment status")
+    sub.add_parser("destroy", help="Delete project and state file")
+    sub.add_parser("import", help="Import existing project from server")
+
+    logs_parser = sub.add_parser("logs", help="View container logs via SSH")
+    logs_parser.add_argument("app", nargs="?", default=None, help="App name (auto-selects if only one)")
+    logs_parser.add_argument("-f", "--follow", action="store_true", help="Follow log output")
+    logs_parser.add_argument("-n", "--tail", type=int, default=100, help="Number of lines (default: 100, 0 for all)")
+    logs_parser.add_argument("--exited", action="store_true", help="Pick from all containers (including exited)")
+
+    exec_parser = sub.add_parser("exec", help="Execute command in container via SSH")
+    exec_parser.add_argument("app", nargs="?", default=None, help="App name (auto-selects if only one)")
+    exec_parser.add_argument("--exited", action="store_true", help="Pick from all containers (including exited)")
+    exec_parser.add_argument("cmd", nargs=argparse.REMAINDER, help="Command to run (default: sh)")
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -730,18 +896,28 @@ def main() -> None:
 
     env_name = args.env or config("DOKPLOY_ENV", default="dev")
 
-    repo_root = find_repo_root()
-
     api_key: str = config("DOKPLOY_API_KEY")  # type: ignore[assignment]
     base_url: str = config("DOKPLOY_URL", default="https://dokploy.example.com")  # type: ignore[assignment]
+    client = DokployClient(base_url, api_key)
+
+    if args.command in ("logs", "exec"):
+        state_file = get_state_file(Path.cwd(), env_name)
+        if args.command == "logs":
+            cmd_logs(client, state_file, args.app, args.follow, args.tail, args.exited)
+        else:
+            exec_cmd = args.cmd if args.cmd else None
+            if exec_cmd and exec_cmd[0] == "--":
+                exec_cmd = exec_cmd[1:]
+            cmd_exec(client, state_file, args.app, args.exited, exec_cmd or None)
+        return
+
+    repo_root = find_repo_root()
+    state_file = get_state_file(repo_root, env_name)
 
     cfg = load_config(repo_root)
     validate_env_references(cfg)
     cfg = merge_env_overrides(cfg, env_name)
     validate_config(cfg)
-
-    client = DokployClient(base_url, api_key)
-    state_file = get_state_file(repo_root, env_name)
 
     match args.command:
         case "setup":

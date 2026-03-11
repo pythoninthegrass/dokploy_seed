@@ -6,6 +6,7 @@ import pytest
 import sys
 import yaml
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # Import main.py as a module despite it being a PEP 723 script.
 _SCRIPT = Path(__file__).resolve().parent.parent / "main.py"
@@ -621,3 +622,177 @@ class TestUnifiedDeploy:
             )
 
         assert calls == ["check"]
+
+
+def _state_with_app(app_name="web", app_id="app-123", dokploy_name="app-foo-bar-abc"):
+    return {
+        "projectId": "proj-1",
+        "environmentId": "env-1",
+        "apps": {
+            app_name: {
+                "applicationId": app_id,
+                "appName": dokploy_name,
+            }
+        },
+    }
+
+
+CONTAINERS_RESPONSE = [
+    {"containerId": "abc123running", "name": "app-foo-bar-abc.1.task1", "state": "running"},
+    {"containerId": "def456exited1", "name": "app-foo-bar-abc.1.task2", "state": "exited"},
+    {"containerId": "ghi789exited2", "name": "app-foo-bar-abc.1.task3", "state": "exited"},
+]
+
+
+class TestGetContainers:
+    def test_returns_containers_from_api(self):
+        client = MagicMock()
+        client.get.return_value = CONTAINERS_RESPONSE
+        result = dokploy.get_containers(client, "app-foo-bar-abc")
+        client.get.assert_called_once_with(
+            "docker.getContainersByAppNameMatch",
+            params={"appName": "app-foo-bar-abc"},
+        )
+        assert len(result) == 3
+
+    def test_empty_containers(self):
+        client = MagicMock()
+        client.get.return_value = []
+        result = dokploy.get_containers(client, "app-no-exist")
+        assert result == []
+
+
+class TestSelectContainer:
+    def test_default_selects_first(self):
+        container = dokploy.select_container(CONTAINERS_RESPONSE, exited=False)
+        assert container["containerId"] == "abc123running"
+
+    def test_default_selects_first_even_if_exited(self):
+        exited_only = [c for c in CONTAINERS_RESPONSE if c["state"] == "exited"]
+        container = dokploy.select_container(exited_only, exited=False)
+        assert container["containerId"] == "def456exited1"
+
+    def test_for_exec_requires_running(self, capsys):
+        exited_only = [c for c in CONTAINERS_RESPONSE if c["state"] == "exited"]
+        with pytest.raises(SystemExit):
+            dokploy.select_container(exited_only, exited=False, for_exec=True)
+        assert "No running container" in capsys.readouterr().out
+
+    def test_for_exec_selects_running(self):
+        container = dokploy.select_container(CONTAINERS_RESPONSE, exited=False, for_exec=True)
+        assert container["containerId"] == "abc123running"
+        assert container["state"] == "running"
+
+    def test_exited_flag_prompts_selection(self):
+        with patch("builtins.input", return_value="1"):
+            container = dokploy.select_container(CONTAINERS_RESPONSE, exited=True)
+        assert container["containerId"] == "abc123running"
+
+    def test_exited_selection_by_index(self):
+        with patch("builtins.input", return_value="2"):
+            container = dokploy.select_container(CONTAINERS_RESPONSE, exited=True)
+        assert container["containerId"] == "def456exited1"
+
+    def test_exited_invalid_input_retries(self, capsys):
+        with patch("builtins.input", side_effect=["0", "999", "abc", "2"]):
+            container = dokploy.select_container(CONTAINERS_RESPONSE, exited=True)
+        assert container["containerId"] == "def456exited1"
+
+    def test_empty_containers_exits(self, capsys):
+        with pytest.raises(SystemExit):
+            dokploy.select_container([], exited=False)
+        assert "No containers found" in capsys.readouterr().out
+
+
+class TestBuildDockerUrl:
+    def test_default_port(self):
+        ssh_cfg = {"host": "dokploy.example.com", "user": "root", "port": 22}
+        url = dokploy.build_docker_url(ssh_cfg)
+        assert url == "ssh://root@dokploy.example.com"
+
+    def test_custom_port(self):
+        ssh_cfg = {"host": "dokploy.example.com", "user": "deploy", "port": 2222}
+        url = dokploy.build_docker_url(ssh_cfg)
+        assert url == "ssh://deploy@dokploy.example.com:2222"
+
+    def test_default_user(self):
+        ssh_cfg = {"host": "10.0.0.1"}
+        url = dokploy.build_docker_url(ssh_cfg)
+        assert url == "ssh://root@10.0.0.1"
+
+
+class TestGetDockerClient:
+    def test_creates_client_with_ssh_url(self):
+        ssh_cfg = {"host": "dokploy.example.com", "user": "ubuntu", "port": 22}
+        with patch.object(dokploy.docker, "DockerClient") as mock_cls:
+            dokploy.get_docker_client(ssh_cfg)
+            mock_cls.assert_called_once_with(
+                base_url="ssh://ubuntu@dokploy.example.com",
+                use_ssh_client=True,
+            )
+
+
+class TestGetSshConfig:
+    def test_reads_from_env(self):
+        env = {
+            "DOKPLOY_SSH_HOST": "myhost.com",
+            "DOKPLOY_SSH_USER": "deploy",
+            "DOKPLOY_SSH_PORT": "2222",
+        }
+        with patch.object(
+            dokploy,
+            "config",
+            side_effect=lambda k, **kw: env.get(k, kw.get("default", "")),
+        ):
+            cfg = dokploy.get_ssh_config()
+        assert cfg == {"host": "myhost.com", "user": "deploy", "port": 2222}
+
+    def test_defaults(self):
+        env = {"DOKPLOY_SSH_HOST": "myhost.com"}
+
+        def _config(k, **kw):
+            return env.get(k, kw.get("default", ""))
+
+        with patch.object(dokploy, "config", side_effect=_config):
+            cfg = dokploy.get_ssh_config()
+        assert cfg == {"host": "myhost.com", "user": "root", "port": 22}
+
+    def test_missing_host_exits(self, capsys):
+        with (
+            patch.object(
+                dokploy,
+                "config",
+                side_effect=lambda k, **kw: kw.get("default", ""),
+            ),
+            pytest.raises(SystemExit),
+        ):
+            dokploy.get_ssh_config()
+        assert "DOKPLOY_SSH_HOST" in capsys.readouterr().out
+
+
+class TestResolveAppForExec:
+    def test_resolves_from_state(self):
+        state = _state_with_app("web", "app-123", "app-foo-bar-abc")
+        app_name = dokploy.resolve_app_for_exec(state, "web")
+        assert app_name == "app-foo-bar-abc"
+
+    def test_unknown_app_exits(self, capsys):
+        state = _state_with_app("web", "app-123", "app-foo-bar-abc")
+        with pytest.raises(SystemExit):
+            dokploy.resolve_app_for_exec(state, "nonexistent")
+        assert "Unknown app" in capsys.readouterr().out
+
+    def test_single_app_auto_selects(self):
+        state = _state_with_app("web", "app-123", "app-foo-bar-abc")
+        app_name = dokploy.resolve_app_for_exec(state, None)
+        assert app_name == "app-foo-bar-abc"
+
+    def test_multiple_apps_no_name_exits(self, capsys):
+        state = _state_with_app("web", "app-123", "app-foo-bar-abc")
+        state["apps"]["worker"] = {
+            "applicationId": "app-456",
+            "appName": "app-baz-qux-def",
+        }
+        with pytest.raises(SystemExit):
+            dokploy.resolve_app_for_exec(state, None)
+        assert "specify an app" in capsys.readouterr().out
