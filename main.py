@@ -278,6 +278,19 @@ class DokployClient:
         return resp.json()
 
 
+def validate_state(client: DokployClient, state: dict) -> bool:
+    """Check if the project in state still exists on the server.
+
+    Returns True if valid or if the server can't be reached (assume valid).
+    Returns False if the project is confirmed gone.
+    """
+    try:
+        projects = client.get("project.all")
+    except httpx.HTTPStatusError:
+        return True
+    return any(p["projectId"] == state["projectId"] for p in projects)
+
+
 def load_state(state_file: Path) -> dict:
     if not state_file.exists():
         print(f"ERROR: State file not found: {state_file}")
@@ -617,7 +630,13 @@ def cmd_deploy(repo_root: Path, client: DokployClient, cfg: dict, state_file: Pa
     cmd_check(repo_root)
 
     if state_file.exists():
-        print("\n==> Phase 2/4: setup (skipped, state file exists)")
+        state = load_state(state_file)
+        if validate_state(client, state):
+            print("\n==> Phase 2/4: setup (skipped, state file exists)")
+        else:
+            print("\n==> Phase 2/4: setup (state orphaned, recreating)")
+            state_file.unlink()
+            cmd_setup(client, cfg, state_file)
     else:
         print("\n==> Phase 2/4: setup")
         cmd_setup(client, cfg, state_file)

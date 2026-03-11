@@ -566,6 +566,7 @@ class TestUnifiedDeploy:
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: calls.append("setup"))
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf: calls.append("trigger"))
+        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
 
         dokploy.cmd_deploy(
             repo_root=tmp_path,

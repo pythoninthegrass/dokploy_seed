@@ -884,6 +884,118 @@ def _make_project_all_response(
     ]
 
 
+class TestValidateState:
+    def _write_state(self, state_file: Path, state: dict) -> None:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps(state))
+
+    def test_valid_state_returns_true(self):
+        """Returns True when projectId exists on the server."""
+        state = {"projectId": "proj-1", "environmentId": "env-1", "apps": {}}
+        projects = [{"projectId": "proj-1", "name": "my-app", "environments": []}]
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/project.all").mock(return_value=httpx.Response(200, json=projects))
+        client = _make_client(router)
+
+        assert dokploy.validate_state(client, state) is True
+
+    def test_orphaned_state_returns_false(self):
+        """Returns False when projectId no longer exists on the server."""
+        state = {"projectId": "proj-deleted", "environmentId": "env-1", "apps": {}}
+        projects = [{"projectId": "proj-other", "name": "other", "environments": []}]
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/project.all").mock(return_value=httpx.Response(200, json=projects))
+        client = _make_client(router)
+
+        assert dokploy.validate_state(client, state) is False
+
+    def test_empty_project_list_returns_false(self):
+        """Returns False when server has no projects at all."""
+        state = {"projectId": "proj-1", "environmentId": "env-1", "apps": {}}
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/project.all").mock(return_value=httpx.Response(200, json=[]))
+        client = _make_client(router)
+
+        assert dokploy.validate_state(client, state) is False
+
+    def test_api_error_returns_true(self):
+        """Returns True (assume valid) when server returns an error."""
+        state = {"projectId": "proj-1", "environmentId": "env-1", "apps": {}}
+
+        router = respx.Router()
+        router.get(f"{BASE_URL}/api/project.all").mock(return_value=httpx.Response(500, text="Internal Server Error"))
+        client = _make_client(router)
+
+        assert dokploy.validate_state(client, state) is True
+
+
+class TestCmdDeployOrphanedState:
+    def _write_state(self, state_file: Path, state: dict) -> None:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps(state))
+
+    def test_orphaned_state_triggers_setup(self, tmp_path, minimal_config, monkeypatch, capsys):
+        """Deploy detects orphaned state, deletes it, and re-runs setup."""
+        stale_state = {
+            "projectId": "proj-deleted",
+            "environmentId": "env-deleted",
+            "apps": {"app": {"applicationId": "app-deleted", "appName": "app-gen"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, stale_state)
+
+        # Write .env and dokploy.yml for check phase
+        (tmp_path / ".env").write_text("FOO=bar\n")
+        (tmp_path / "dokploy.yml").write_text(yaml.dump(minimal_config))
+        monkeypatch.setenv("DOKPLOY_API_KEY", API_KEY)
+        monkeypatch.setenv("DOKPLOY_URL", BASE_URL)
+
+        with respx.mock(assert_all_called=False) as mock:
+            # check phase routes (cmd_check uses httpx directly, not the client)
+            mock.get(f"{BASE_URL}/").mock(return_value=httpx.Response(200))
+            mock.get(f"{BASE_URL}/api/project.all").mock(return_value=httpx.Response(200, json=[]))
+
+            # setup phase routes (after orphan detection)
+            mock.post(f"{BASE_URL}/api/project.create").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "project": {"projectId": "proj-new-001"},
+                        "environment": {"environmentId": "env-new-001"},
+                    },
+                )
+            )
+            mock.post(f"{BASE_URL}/api/application.create").mock(
+                return_value=httpx.Response(200, json={"applicationId": "app-new-001", "appName": "app-new-gen"})
+            )
+            for ep in (
+                "application.saveDockerProvider",
+                "application.saveBuildType",
+                "application.update",
+                "domain.create",
+            ):
+                mock.post(f"{BASE_URL}/api/{ep}").mock(return_value=httpx.Response(200, json={}))
+
+            # env phase routes
+            mock.post(f"{BASE_URL}/api/application.saveEnvironment").mock(return_value=httpx.Response(200, json={}))
+
+            # trigger phase routes
+            mock.post(f"{BASE_URL}/api/application.deploy").mock(return_value=httpx.Response(200, content=b""))
+
+            client = dokploy.DokployClient(BASE_URL, API_KEY)
+            dokploy.cmd_deploy(tmp_path, client, minimal_config, state_file)
+
+        output = capsys.readouterr().out
+        assert "orphaned" in output.lower() or "recreating" in output.lower()
+
+        # State file should now have the new project ID, not the stale one
+        new_state = json.loads(state_file.read_text())
+        assert new_state["projectId"] == "proj-new-001"
+
+
 class TestCmdImport:
     def test_happy_path(self, tmp_path, minimal_config):
         """Import writes correct state file from existing project."""
