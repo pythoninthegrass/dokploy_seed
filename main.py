@@ -31,8 +31,17 @@ import json
 import re
 import sys
 import yaml
-from decouple import config
+from decouple import Config, RepositoryEnv
 from pathlib import Path
+
+
+def _build_config() -> Config:
+    """Build a decouple Config that reads .env from the current working directory."""
+    env_file = Path.cwd() / ".env"
+    return Config(RepositoryEnv(str(env_file)))
+
+
+config = _build_config()
 
 
 def find_repo_root() -> Path:
