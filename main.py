@@ -579,7 +579,7 @@ def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path)
                 "application.saveEnvironment",
                 {
                     "applicationId": app_id,
-                    "env": filtered,
+                    "env": resolve_refs(filtered, state),
                     "buildArgs": None,
                     "buildSecrets": None,
                     "createEnvFile": create_env_file,
