@@ -1,10 +1,10 @@
-# dokploy_seed
+# icarus
 
 Deployment tool for [Dokploy](https://dokploy.com). Define your project's apps, domains, deploy order, and environment overrides in a single `dokploy.yml` — the tool handles the Dokploy API calls (cf. IaC).
 
 **Table of Contents**
 
-* [dokploy\_seed](#dokploy_seed)
+* [icarus](#icarus)
   * [Prerequisites](#prerequisites)
   * [Install](#install)
   * [Quick Start](#quick-start)
@@ -48,11 +48,11 @@ uv run --script main.py --help
 
 ```bash
 # One-off execution
-uvx --from git+https://github.com/pythoninthegrass/dokploy_seed.git dps --help
+uvx --from git+https://github.com/pythoninthegrass/icarus.git ic --help
 
 # Persistent install
-uv tool install git+https://github.com/pythoninthegrass/dokploy_seed.git
-dps --help
+uv tool install git+https://github.com/pythoninthegrass/icarus.git
+ic --help
 ```
 
 ## Quick Start
@@ -73,17 +73,17 @@ dps --help
 4. Run:
 
     ```bash
-    dps --env prod setup     # Create project + apps + providers + domains
-    dps --env prod env       # Push filtered .env to env_targets + per-app env
-    dps --env prod deploy    # Deploy apps in wave order
-    dps --env prod status    # Show status of all apps
-    dps --env prod destroy   # Delete project + all apps
+    ic --env prod setup     # Create project + apps + providers + domains
+    ic --env prod env       # Push filtered .env to env_targets + per-app env
+    ic --env prod deploy    # Deploy apps in wave order
+    ic --env prod status    # Show status of all apps
+    ic --env prod destroy   # Delete project + all apps
     ```
 
 ### Creating from the command line
 
 ```bash
-gh repo create my-project --template pythoninthegrass/dokploy_seed --private --clone
+gh repo create my-project --template pythoninthegrass/icarus --private --clone
 cd my-project
 ```
 
@@ -103,14 +103,14 @@ The `--env` flag is optional and defaults to `dev`. It can also be set via the `
 
 ```bash
 # Explicit flag (highest priority)
-dps --env prod status
+ic --env prod status
 
 # Via environment variable
 export DOKPLOY_ENV=prod
-dps status
+ic status
 
 # No flag, no variable -> defaults to 'dev'
-dps status
+ic status
 
 # Standalone mode
 uv run --script main.py --env prod status
@@ -125,7 +125,7 @@ All configuration lives in `dokploy.yml`. See [docs/configuration.md](docs/confi
 The file is validated by `schemas/dokploy.schema.json`. Add this directive at the top of your `dokploy.yml` for IDE autocomplete and validation:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/dokploy_seed/main/schemas/dokploy.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/icarus/main/schemas/dokploy.schema.json
 ```
 
 ## Multi-Environment Support
@@ -181,10 +181,10 @@ See the `examples/` directory:
 
 ## Adding to an Existing Project
 
-Install `dps` globally:
+Install `ic` globally:
 
 ```bash
-uv tool install git+https://github.com/pythoninthegrass/dokploy_seed.git
+uv tool install git+https://github.com/pythoninthegrass/icarus.git
 ```
 
 Then in your project directory:
@@ -192,7 +192,7 @@ Then in your project directory:
 1. Create `dokploy.yml` based on `dokploy.yml.example` (schema is fetched from GitHub automatically)
 2. Create `.dokploy-state/` directory (add a `.gitkeep`)
 3. Add `DOKPLOY_URL` and `DOKPLOY_API_KEY` to your `.env`
-4. Run `dps --env prod setup`
+4. Run `ic --env prod setup`
 
 > [!WARNING]
 > The `destroy` command is irreversible — it deletes the entire Dokploy project and all associated apps. The local state file is also removed.
@@ -201,7 +201,7 @@ Then in your project directory:
 
 ```text
 main.py                  # PEP 723 standalone script + all logic
-src/dokploy_seed/
+src/icarus/
   __init__.py            # Re-exports main for package distribution
   main.py                # Symlink to ../../main.py
 pyproject.toml           # uv_build backend + entry point
