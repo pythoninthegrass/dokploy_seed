@@ -3,7 +3,7 @@
   "packages": {
     ".": {
       "release-type": "python",
-      "package-name": "dokploy-seed",
+      "package-name": "icarus",
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true
     }

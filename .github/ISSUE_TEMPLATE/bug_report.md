@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug in dokploy_seed
+about: Report a bug in icarus
 labels: bug
 ---
 

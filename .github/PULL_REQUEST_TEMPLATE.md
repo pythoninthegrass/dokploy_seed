@@ -12,6 +12,6 @@ How were the changes tested?
 
 ## Checklist
 
-- [ ] `dps --help` still works
+- [ ] `ic --help` still works
 - [ ] Example configs validate against the schema
 - [ ] Markdown files pass `markdownlint`

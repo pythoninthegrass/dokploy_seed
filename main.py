@@ -19,10 +19,10 @@
 Dokploy deployment script — config-driven via dokploy.yml.
 
 Usage:
-    dps check
-    dps --env <environment> <setup|env|deploy|status|destroy>
-    dps --env <environment> logs [app] [-f] [-n TAIL] [--exited]
-    dps --env <environment> exec [app] [--exited] [-- command...]
+    ic check
+    ic --env <environment> <setup|env|deploy|status|destroy>
+    ic --env <environment> logs [app] [-f] [-n TAIL] [--exited]
+    ic --env <environment> exec [app] [--exited] [-- command...]
 
 Environment can also be set via DOKPLOY_ENV env var.
 SSH commands (logs, exec) require DOKPLOY_SSH_HOST in .env.

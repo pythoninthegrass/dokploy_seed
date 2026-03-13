@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`dokploy_seed` — a config-driven deployment tool for [Dokploy](https://dokploy.com). Installable via `uv tool install` or runnable standalone as a PEP 723 script. Define apps, domains, deploy order, and environment overrides in `dokploy.yml`; the tool handles all Dokploy API calls.
+`icarus` — a config-driven deployment tool for [Dokploy](https://dokploy.com). Installable via `uv tool install` or runnable standalone as a PEP 723 script. Define apps, domains, deploy order, and environment overrides in `dokploy.yml`; the tool handles all Dokploy API calls.
 
 ## Tech Stack
 
@@ -14,10 +14,10 @@
 
 ```text
 main.py                     # PEP 723 standalone script + all logic
-src/dokploy_seed/
+src/icarus/
   __init__.py               # Re-exports main for package distribution
   main.py                   # Symlink to ../../main.py
-pyproject.toml              # uv_build backend + dps entry point
+pyproject.toml              # uv_build backend + ic entry point
 dokploy.yml.example         # Annotated starter config
 schemas/dokploy.schema.json # JSON Schema for dokploy.yml
 .dokploy-state/             # State files (resource IDs, committed)
@@ -32,19 +32,19 @@ tests/                      # Pytest suite (see docs/testing.md)
 ### Installed via uv tool
 
 ```bash
-dps --help                                # Show usage
-dps check                                 # Pre-flight checks
-dps --env prod setup                      # Create project
-dps --env prod env                        # Push env vars
-dps --env prod deploy                     # Deploy apps
-dps --env prod status                     # Check status
-dps --env prod destroy                    # Tear down
-dps --env prod logs django                # Tail 100 lines of container logs
-dps --env prod logs django -f             # Follow log output
-dps --env prod logs django -n 500         # Last 500 lines
-dps --env prod logs django --exited       # Pick from exited containers
-dps --env prod exec django                # Interactive shell (sh)
-dps --env prod exec django -- python manage.py shell  # Run command
+ic --help                                # Show usage
+ic check                                 # Pre-flight checks
+ic --env prod setup                      # Create project
+ic --env prod env                        # Push env vars
+ic --env prod deploy                     # Deploy apps
+ic --env prod status                     # Check status
+ic --env prod destroy                    # Tear down
+ic --env prod logs django                # Tail 100 lines of container logs
+ic --env prod logs django -f             # Follow log output
+ic --env prod logs django -n 500         # Last 500 lines
+ic --env prod logs django --exited       # Pick from exited containers
+ic --env prod exec django                # Interactive shell (sh)
+ic --env prod exec django -- python manage.py shell  # Run command
 ```
 
 ### Standalone (no install)
@@ -84,7 +84,7 @@ See [docs/testing.md](docs/testing.md) for fixture architecture, markers, covera
 **CRITICAL**: Before running `wt remove`, you MUST first change your working directory to the main repo:
 
 ```bash
-cd dokploy_seed && wt remove <name>
+cd icarus && wt remove <name>
 ```
 
 If you skip this, `wt remove` deletes your CWD and **every subsequent Bash call will fail irrecoverably**. There is no way to fix a broken CWD in a Claude Code session — the entire session is bricked.

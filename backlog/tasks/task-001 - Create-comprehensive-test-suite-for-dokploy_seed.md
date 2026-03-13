@@ -1,6 +1,6 @@
 ---
 id: TASK-001
-title: Create comprehensive test suite for dokploy_seed
+title: Create comprehensive test suite for icarus
 status: Done
 assignee: []
 created_date: '2026-03-06 08:11'

@@ -268,52 +268,6 @@ ssh = [
 ]
 
 [[package]]
-name = "dokploy-seed"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "docker", extra = ["ssh"] },
-    { name = "httpx" },
-    { name = "python-decouple" },
-    { name = "pyyaml" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "ruff" },
-]
-test = [
-    { name = "coverage" },
-    { name = "hypothesis", extra = ["cli"] },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "pytest-datafiles" },
-    { name = "pytest-timeout" },
-    { name = "pytest-xdist" },
-    { name = "respx" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "coverage", marker = "extra == 'test'", specifier = ">=7.6.1,<8.0.0" },
-    { name = "docker", extras = ["ssh"], specifier = ">=7.0" },
-    { name = "httpx", specifier = ">=0.28.1,<1" },
-    { name = "hypothesis", extras = ["cli"], marker = "extra == 'test'", specifier = ">=6.112.1,<7.0.0" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3.3,<9.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.24.0,<1.0.0" },
-    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=6.1.1" },
-    { name = "pytest-datafiles", marker = "extra == 'test'", specifier = ">=3.0.0,<4.0.0" },
-    { name = "pytest-timeout", marker = "extra == 'test'", specifier = ">=2.3.1" },
-    { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3.6.1,<4.0.0" },
-    { name = "python-decouple", specifier = ">=3.8" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "respx", marker = "extra == 'test'", specifier = ">=0.22.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.5" },
-]
-provides-extras = ["dev", "test"]
-
-[[package]]
 name = "execnet"
 version = "2.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -377,6 +331,52 @@ cli = [
     { name = "click" },
     { name = "rich" },
 ]
+
+[[package]]
+name = "icarus"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "docker", extra = ["ssh"] },
+    { name = "httpx" },
+    { name = "python-decouple" },
+    { name = "pyyaml" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "ruff" },
+]
+test = [
+    { name = "coverage" },
+    { name = "hypothesis", extra = ["cli"] },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "pytest-datafiles" },
+    { name = "pytest-timeout" },
+    { name = "pytest-xdist" },
+    { name = "respx" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "coverage", marker = "extra == 'test'", specifier = ">=7.6.1,<8.0.0" },
+    { name = "docker", extras = ["ssh"], specifier = ">=7.0" },
+    { name = "httpx", specifier = ">=0.28.1,<1" },
+    { name = "hypothesis", extras = ["cli"], marker = "extra == 'test'", specifier = ">=6.112.1,<7.0.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3.3,<9.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.24.0,<1.0.0" },
+    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=6.1.1" },
+    { name = "pytest-datafiles", marker = "extra == 'test'", specifier = ">=3.0.0,<4.0.0" },
+    { name = "pytest-timeout", marker = "extra == 'test'", specifier = ">=2.3.1" },
+    { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3.6.1,<4.0.0" },
+    { name = "python-decouple", specifier = ">=3.8" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "respx", marker = "extra == 'test'", specifier = ">=0.22.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.5" },
+]
+provides-extras = ["dev", "test"]
 
 [[package]]
 name = "idna"
