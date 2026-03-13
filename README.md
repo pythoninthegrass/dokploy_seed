@@ -1,5 +1,11 @@
 # icarus
 
+<p align="center">
+  <img src="logo.png" alt="icarus logo" width="300">
+  <br>
+  <sub>Image credit: <a href="https://www.history-for-kids.com/icarus.html">History for Kids</a></sub>
+</p>
+
 Deployment tool for [Dokploy](https://dokploy.com). Define your project's apps, domains, deploy order, and environment overrides in a single `dokploy.yml` — the tool handles the Dokploy API calls (cf. IaC).
 
 **Table of Contents**
@@ -136,7 +142,6 @@ Each deployment targets a named environment (e.g. `prod`, `dev`). The environmen
 2. **State file**: each environment gets its own `.dokploy-state/<env>.json`
 3. **Config overrides**: the `environments` section in `dokploy.yml` can override `github` settings and per-app properties
 
-<!-- markdownlint-disable MD033 -->
 <details>
 <summary><strong>Config Merging</strong></summary>
 
@@ -156,7 +161,6 @@ The `environments.<env>` section is merged into the base config before any comma
 The tool walks upward from the current working directory looking for `dokploy.yml`. This means it works from any subdirectory within a project that has a `dokploy.yml` at its root.
 
 </details>
-<!-- markdownlint-enable MD033 -->
 
 ## Env Filtering
 
