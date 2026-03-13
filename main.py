@@ -36,14 +36,16 @@ import json
 import re
 import sys
 import yaml
-from decouple import Config, RepositoryEnv
+from decouple import Config, RepositoryEmpty, RepositoryEnv
 from pathlib import Path
 
 
 def _build_config() -> Config:
     """Build a decouple Config that reads .env from the current working directory."""
     env_file = Path.cwd() / ".env"
-    return Config(RepositoryEnv(str(env_file)))
+    if env_file.is_file():
+        return Config(RepositoryEnv(str(env_file)))
+    return Config(RepositoryEmpty())
 
 
 config = _build_config()

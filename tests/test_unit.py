@@ -17,6 +17,22 @@ _spec.loader.exec_module(dokploy)
 pytestmark = pytest.mark.unit
 
 
+class TestBuildConfig:
+    def test_missing_env_file_falls_back_to_env_vars(self, tmp_path, monkeypatch):
+        """_build_config returns a working Config even when .env does not exist."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("DOKPLOY_URL", "https://test.example.com")
+        cfg = dokploy._build_config()
+        assert cfg("DOKPLOY_URL") == "https://test.example.com"
+
+    def test_reads_env_file_when_present(self, tmp_path, monkeypatch):
+        """_build_config reads values from .env when the file exists."""
+        (tmp_path / ".env").write_text("MY_TEST_VAR=from_file\n")
+        monkeypatch.chdir(tmp_path)
+        cfg = dokploy._build_config()
+        assert cfg("MY_TEST_VAR") == "from_file"
+
+
 class TestFindRepoRoot:
     def test_finds_repo_root(self, tmp_path, monkeypatch):
         """find_repo_root walks up and returns the dir containing dokploy.yml."""
