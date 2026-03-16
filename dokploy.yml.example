@@ -48,6 +48,10 @@ apps:
   - name: redis
     source: docker
     dockerImage: redis:7-alpine
+    volumes:
+      - source: redis_data
+        target: /data
+        type: volume
 
   - name: web
     source: github

@@ -302,6 +302,13 @@
             "type": "boolean",
             "default": false,
             "description": "Write env vars to a .env file in the container working directory (default: false)"
+          },
+          "volumes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/volume"
+            },
+            "description": "Persistent volume mounts for the application"
           }
         },
         "if": {
@@ -320,6 +327,33 @@
     }
   },
   "$defs": {
+    "volume": {
+      "type": "object",
+      "required": [
+        "source",
+        "target",
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Volume name (for type: volume) or host path (for type: bind)"
+        },
+        "target": {
+          "type": "string",
+          "description": "Mount path inside the container"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "volume",
+            "bind"
+          ],
+          "description": "Mount type: volume (Docker-managed) or bind (host path)"
+        }
+      }
+    },
     "domain": {
       "type": "object",
       "required": [

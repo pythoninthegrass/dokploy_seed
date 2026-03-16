@@ -73,6 +73,12 @@ def github_dockerfile_config():
 
 
 @pytest.fixture
+def volumes_config():
+    """Config with volume mounts (volume and bind types)."""
+    return _load_fixture("volumes_config.yml")
+
+
+@pytest.fixture
 def dokploy_yml(tmp_path, minimal_config):
     """Write a minimal dokploy.yml in tmp_path and return the path."""
     config_file = tmp_path / "dokploy.yml"

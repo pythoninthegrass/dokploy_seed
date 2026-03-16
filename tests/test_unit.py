@@ -479,6 +479,46 @@ class TestBuildAppSettingsPayload:
         assert result["autoDeploy"] is False
 
 
+class TestBuildMountPayload:
+    def test_volume_mount(self):
+        """Volume mount produces correct API payload."""
+        mount = {"source": "app_data", "target": "/data", "type": "volume"}
+        result = dokploy.build_mount_payload("app-1", mount)
+        assert result == {
+            "applicationId": "app-1",
+            "type": "volume",
+            "volumeName": "app_data",
+            "mountPath": "/data",
+            "serviceType": "application",
+        }
+
+    def test_bind_mount(self):
+        """Bind mount produces correct API payload."""
+        mount = {"source": "/host/data", "target": "/container/data", "type": "bind"}
+        result = dokploy.build_mount_payload("app-1", mount)
+        assert result == {
+            "applicationId": "app-1",
+            "type": "bind",
+            "hostPath": "/host/data",
+            "mountPath": "/container/data",
+            "serviceType": "application",
+        }
+
+    def test_volume_mount_uses_volume_name_not_host_path(self):
+        """Volume mount sets volumeName, not hostPath."""
+        mount = {"source": "my_vol", "target": "/mnt", "type": "volume"}
+        result = dokploy.build_mount_payload("app-1", mount)
+        assert "volumeName" in result
+        assert "hostPath" not in result
+
+    def test_bind_mount_uses_host_path_not_volume_name(self):
+        """Bind mount sets hostPath, not volumeName."""
+        mount = {"source": "/host/path", "target": "/mnt", "type": "bind"}
+        result = dokploy.build_mount_payload("app-1", mount)
+        assert "hostPath" in result
+        assert "volumeName" not in result
+
+
 class TestMergeEnvOverridesNewFields:
     def test_build_type_override_merges(self, github_static_config):
         """Environment override for autoDeploy/replicas merges into app."""
@@ -523,6 +563,21 @@ class TestValidateConfigNewFixtures:
 
     def test_dockerfile_config_valid(self, github_dockerfile_config):
         dokploy.validate_config(github_dockerfile_config)
+
+    def test_volumes_config_valid(self, volumes_config):
+        dokploy.validate_config(volumes_config)
+
+    def test_volumes_parsed_correctly(self, volumes_config):
+        db = next(a for a in volumes_config["apps"] if a["name"] == "db")
+        assert len(db["volumes"]) == 1
+        assert db["volumes"][0]["type"] == "volume"
+        assert db["volumes"][0]["source"] == "pg_data"
+        assert db["volumes"][0]["target"] == "/var/lib/postgresql/data"
+
+        app = next(a for a in volumes_config["apps"] if a["name"] == "app")
+        assert len(app["volumes"]) == 2
+        assert app["volumes"][0]["type"] == "volume"
+        assert app["volumes"][1]["type"] == "bind"
 
 
 class TestUnifiedDeploy:
@@ -639,6 +694,86 @@ class TestUnifiedDeploy:
             )
 
         assert calls == ["check"]
+
+
+class TestCmdSetupVolumes:
+    def _mock_client(self, app_id="app-1", app_name="app-abc123"):
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "application.create": {"applicationId": app_id, "appName": app_name},
+            "project.create": {
+                "project": {"projectId": "proj-1"},
+                "environment": {"environmentId": "env-1"},
+            },
+        }.get(endpoint, {})
+        client.get.return_value = []
+        return client
+
+    def test_volumes_create_mounts(self, tmp_path):
+        """cmd_setup calls mounts.create for each volume."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "volumes": [
+                        {"source": "app_data", "target": "/data", "type": "volume"},
+                        {"source": "/host/config", "target": "/config", "type": "bind"},
+                    ],
+                }
+            ],
+        }
+        client = self._mock_client()
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        dokploy.cmd_setup(client, cfg, state_file)
+
+        mount_calls = [call for call in client.post.call_args_list if call[0][0] == "mounts.create"]
+        assert len(mount_calls) == 2
+        assert mount_calls[0][0][1]["type"] == "volume"
+        assert mount_calls[0][0][1]["volumeName"] == "app_data"
+        assert mount_calls[1][0][1]["type"] == "bind"
+        assert mount_calls[1][0][1]["hostPath"] == "/host/config"
+
+    def test_no_volumes_skips_mounts(self, tmp_path):
+        """cmd_setup skips mount creation when no volumes defined."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                }
+            ],
+        }
+        client = self._mock_client()
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        dokploy.cmd_setup(client, cfg, state_file)
+
+        mount_calls = [call for call in client.post.call_args_list if call[0][0] == "mounts.create"]
+        assert len(mount_calls) == 0
+
+    def test_empty_volumes_list_skips_mounts(self, tmp_path):
+        """cmd_setup skips mount creation when volumes is an empty list."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "volumes": [],
+                }
+            ],
+        }
+        client = self._mock_client()
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        dokploy.cmd_setup(client, cfg, state_file)
+
+        mount_calls = [call for call in client.post.call_args_list if call[0][0] == "mounts.create"]
+        assert len(mount_calls) == 0
 
 
 def _state_with_app(app_name="web", app_id="app-123", dokploy_name="app-foo-bar-abc"):

@@ -257,6 +257,21 @@ def build_app_settings_payload(app_id: str, app_def: dict) -> dict | None:
     return payload if len(payload) > 1 else None
 
 
+def build_mount_payload(app_id: str, mount: dict) -> dict:
+    """Build payload for mounts.create."""
+    payload = {
+        "applicationId": app_id,
+        "type": mount["type"],
+        "mountPath": mount["target"],
+        "serviceType": "application",
+    }
+    if mount["type"] == "volume":
+        payload["volumeName"] = mount["source"]
+    elif mount["type"] == "bind":
+        payload["hostPath"] = mount["source"]
+    return payload
+
+
 class DokployClient:
     """Thin httpx wrapper for Dokploy API."""
 
@@ -547,7 +562,19 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
             print(f"Updating app settings for {name}...")
             client.post("application.update", settings_payload)
 
-    # 8. Save state
+    # 8. Volume mounts
+    for app_def in cfg["apps"]:
+        volumes = app_def.get("volumes")
+        if not volumes:
+            continue
+        name = app_def["name"]
+        app_id = state["apps"][name]["applicationId"]
+        for vol in volumes:
+            print(f"Creating mount for {name}: {vol['source']} -> {vol['target']}...")
+            mount_payload = build_mount_payload(app_id, vol)
+            client.post("mounts.create", mount_payload)
+
+    # 9. Save state
     save_state(state, state_file)
     print("\nSetup complete!")
     print(f"  Project: {project_id}")

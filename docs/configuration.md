@@ -74,6 +74,15 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | `apps[].triggerType` | no | GitHub trigger type: `push` (default) or `manual` |
 | `apps[].watchPaths` | no | File paths to watch for auto-deploy triggers (list of strings) |
 | `apps[].create_env_file` | no | Write env vars to a `.env` file in the container working directory (default: `false`) |
+| `apps[].volumes` | no | List of volume mount objects for persistent storage |
+
+### Volume Mount Object
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `volume.source` | yes | Volume name (for `type: volume`) or host path (for `type: bind`) |
+| `volume.target` | yes | Mount path inside the container |
+| `volume.type` | yes | `volume` (Docker-managed) or `bind` (host path) |
 
 ### Domain Object
 

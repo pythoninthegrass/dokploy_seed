@@ -1,0 +1,25 @@
+project:
+  name: my-volumes-app
+  description: "App with volume mounts\n"
+  deploy_order:
+    - - db
+    - - app
+
+apps:
+  - name: db
+    source: docker
+    dockerImage: postgres:17-alpine
+    volumes:
+      - source: pg_data
+        target: /var/lib/postgresql/data
+        type: volume
+  - name: app
+    source: docker
+    dockerImage: nginx:alpine
+    volumes:
+      - source: app_data
+        target: /data
+        type: volume
+      - source: /host/config
+        target: /etc/app/config
+        type: bind
