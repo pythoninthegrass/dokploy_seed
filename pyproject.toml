@@ -31,7 +31,6 @@ test = [
 ]
 
 [project.scripts]
-dps = "dokploy_seed:main"
 ic = "icarus:main"
 
 [build-system]
