@@ -2,21 +2,22 @@
 
 ## Project Overview
 
-`dokploy_seed` — a standalone, config-driven deployment script for [Dokploy](https://dokploy.com). Installable via `uv tool install` or copied directly into any project repo. Define apps, domains, deploy order, and environment overrides in `dokploy.yml`; the script handles all Dokploy API calls.
+`icarus` — a config-driven deployment tool for [Dokploy](https://dokploy.com). Installable via `uv tool install` or runnable standalone as a PEP 723 script. Define apps, domains, deploy order, and environment overrides in `dokploy.yml`; the tool handles all Dokploy API calls.
 
 ## Tech Stack
 
-- **Python 3.13** — dual-mode: PEP 723 inline script (`uv run --script`) or installable package (`uv tool install`)
-- **uv** for script execution and tool installation
-- **uv_build** backend for `pyproject.toml`-based packaging
-- Dependencies: `httpx`, `python-decouple`, `pyyaml`
+- **Python 3.13** — dual-mode: PEP 723 inline script (`main.py`) + `uv_build` packaging for tool install
+- **uv** for execution (`uv run --script`) and distribution (`uv tool install`)
+- Dependencies: `docker[ssh]`, `httpx`, `python-decouple`, `pyyaml`
 
 ## Project Structure
 
 ```text
-dokploy.py                  # The deployment script (top-level, PEP 723)
-pyproject.toml              # Package metadata, entry point, build config
-src/dokploy_seed/           # Package for uv tool install (symlinks to dokploy.py)
+main.py                     # PEP 723 standalone script + all logic
+src/icarus/
+  __init__.py               # Re-exports main for package distribution
+  main.py                   # Symlink to ../../main.py
+pyproject.toml              # uv_build backend + ic entry point
 dokploy.yml.example         # Annotated starter config
 schemas/dokploy.schema.json # JSON Schema for dokploy.yml
 .dokploy-state/             # State files (resource IDs, committed)
@@ -28,18 +29,30 @@ tests/                      # Pytest suite (see docs/testing.md)
 
 ## Key Commands
 
-```bash
-# Via uv tool install (global CLI)
-dps --help                                               # Show usage
-dps check                                                # Pre-flight checks
-dps --env prod setup                                     # Create project
-dps --env prod deploy                                    # Deploy apps
-dps --env prod status                                    # Check status
+### Installed via uv tool
 
-# Via uv run --script (standalone, no install)
-uv run --script dokploy.py --help                        # Show usage
-uv run --script dokploy.py --env prod setup              # Create project
-uv run --script dokploy.py --env prod deploy             # Deploy apps
+```bash
+ic --help                                # Show usage
+ic check                                 # Pre-flight checks
+ic --env prod setup                      # Create project
+ic --env prod env                        # Push env vars
+ic --env prod deploy                     # Deploy apps
+ic --env prod status                     # Check status
+ic --env prod destroy                    # Tear down
+ic --env prod logs django                # Tail 100 lines of container logs
+ic --env prod logs django -f             # Follow log output
+ic --env prod logs django -n 500         # Last 500 lines
+ic --env prod logs django --exited       # Pick from exited containers
+ic --env prod exec django                # Interactive shell (sh)
+ic --env prod exec django -- python manage.py shell  # Run command
+```
+
+### Standalone (no install)
+
+```bash
+uv run --script main.py --help            # Show usage
+uv run --script main.py check             # Pre-flight checks
+uv run --script main.py --env prod setup  # Create project
 ```
 
 ## Testing
@@ -71,12 +84,29 @@ See [docs/testing.md](docs/testing.md) for fixture architecture, markers, covera
 **CRITICAL**: Before running `wt remove`, you MUST first change your working directory to the main repo:
 
 ```bash
-cd dokploy_seed && wt remove <name>
+cd icarus && wt remove <name>
 ```
 
 If you skip this, `wt remove` deletes your CWD and **every subsequent Bash call will fail irrecoverably**. There is no way to fix a broken CWD in a Claude Code session — the entire session is bricked.
 
 Shell integration (`wt` as a shell function) does NOT help here because each Bash tool call is an independent shell — the `cd` side-effect cannot persist.
+
+## Ad-hoc API Calls
+
+Query the live Dokploy API from a local `.env` file:
+
+```bash
+curl -s -H "x-api-key: $(rg '^DOKPLOY_API_KEY=' .env | cut -d= -f2)" \
+  "$(rg '^DOKPLOY_URL=' .env | cut -d= -f2)/api/<endpoint>" | jq .
+```
+
+Example — list all API paths:
+
+```bash
+curl -s -H "x-api-key: $(rg '^DOKPLOY_API_KEY=' .env | cut -d= -f2)" \
+  "$(rg '^DOKPLOY_URL=' .env | cut -d= -f2)/api/settings.getOpenApiDocument" \
+  | jq '.paths | keys[]'
+```
 
 ## Context7
 
@@ -86,6 +116,7 @@ Always use Context7 MCP when I need library/API documentation, code generation, 
 
 - astral-sh/uv
 - astral-sh/ruff
+- docker/docker-py
 - dokploy/website
 - hypothesisworks/hypothesis
 - jdx/mise
@@ -110,13 +141,13 @@ This project uses Backlog.md MCP for all task and project management.
 
 ### Key MCP Commands
 
-| Command         | Purpose                                                                             |
-| --------------- | ----------------------------------------------------------------------------------- |
-| `task_create`   | Create a new task (status defaults to "To Do")                                      |
-| `task_edit`     | Edit metadata, check ACs, update notes, change status                               |
-| `task_view`     | View full task details                                                              |
-| `task_search`   | Find tasks by keyword                                                               |
-| `task_list`     | List tasks with optional filters                                                    |
+| Command | Purpose |
+|---------|---------|
+| `task_create` | Create a new task (status defaults to "To Do") |
+| `task_edit` | Edit metadata, check ACs, update notes, change status |
+| `task_view` | View full task details |
+| `task_search` | Find tasks by keyword |
+| `task_list` | List tasks with optional filters |
 | `task_complete` | **Moves task to `backlog/completed/`** — only use for cleanup, not for marking done |
 
 ### Task Lifecycle

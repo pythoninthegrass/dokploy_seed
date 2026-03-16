@@ -15,8 +15,6 @@
   "MD031": false,
   // Emphasis as heading (e.g., table of contents)
   "MD036": false,
-  // Table column style
-  "MD060": {
-    "style": "aligned"
-  }
+  // Inline HTML
+  "MD033": false
 }

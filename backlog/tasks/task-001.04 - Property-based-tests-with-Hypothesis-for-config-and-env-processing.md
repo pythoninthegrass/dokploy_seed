@@ -95,7 +95,7 @@ Consider using `hypothesis-jsonschema` to generate configs from `schemas/dokploy
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Worktree: ~/git/dokploy_seed.001.04-property-tests (branch: 001.04-property-tests)
+Worktree: ~/git/icarus.001.04-property-tests (branch: 001.04-property-tests)
 
 Files created/modified:
 - tests/strategies.py — reusable Hypothesis strategies (env_content, exclude_prefixes, state_dict, app_config, dokploy_config, etc.)

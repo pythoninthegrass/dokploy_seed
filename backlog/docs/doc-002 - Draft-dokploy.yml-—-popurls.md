@@ -16,7 +16,7 @@ Reproduces the prod "popurls" project (Glance dashboard) on Dokploy.
 ## Config
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/dokploy_seed/main/schemas/dokploy.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/icarus/main/schemas/dokploy.schema.json
 
 project:
   name: popurls

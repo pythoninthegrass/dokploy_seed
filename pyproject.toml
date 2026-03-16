@@ -1,12 +1,13 @@
 [project]
-name = "dokploy-seed"
-version = "0.1.0"
+name = "icarus"
+version = "0.2.0"
 authors = [
     { name = "pythoninthegrass", email = "4097471+pythoninthegrass@users.noreply.github.com" }
 ]
 requires-python = ">=3.13,<3.14"
 
 dependencies = [
+    "docker[ssh]>=7.0",
     "httpx>=0.28.1,<1",
     "python-decouple>=3.8",
     "pyyaml>=6.0",
@@ -50,3 +51,10 @@ markers = [
     "benchmark: marks performance benchmark tests",
     "property: marks property-based tests (Hypothesis)"
 ]
+
+[project.scripts]
+ic = "icarus:main"
+
+[build-system]
+requires = ["uv_build>=0.10.2,<0.11.0"]
+build-backend = "uv_build"

@@ -3,7 +3,7 @@
 `dokploy.yml` is validated by `schemas/dokploy.schema.json`. Add this directive at the top for IDE autocomplete:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/dokploy_seed/main/schemas/dokploy.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/icarus/main/schemas/dokploy.schema.json
 ```
 
 ## Top-Level Keys
@@ -103,15 +103,20 @@ Resolution happens during `setup` (for commands) and `env` (for environment vari
 | `DOKPLOY_API_KEY` | yes | — | API key for authentication |
 | `DOKPLOY_ENV` | no | `dev` | Target environment (alternative to `--env` flag) |
 | `ENV_EXCLUDE_PREFIXES` | no | — | Extra env var prefixes to exclude when pushing `.env` |
+| `DOKPLOY_SSH_HOST` | for logs/exec | — | SSH host for Docker access (IP or hostname) |
+| `DOKPLOY_SSH_USER` | no | `root` | SSH user for Docker access |
+| `DOKPLOY_SSH_PORT` | no | `22` | SSH port for Docker access |
 
 Resolution order: `--env` flag > `DOKPLOY_ENV` (from `.env` or environment) > `dev`.
+
+The `DOKPLOY_SSH_*` variables are only required for the `logs` and `exec` commands, which connect to the Docker daemon on the Dokploy host via SSH.
 
 ## Schema Directive
 
 The `# yaml-language-server` directive at the top of `dokploy.yml` enables IDE features:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/dokploy_seed/main/schemas/dokploy.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/icarus/main/schemas/dokploy.schema.json
 ```
 
 This works in VS Code (with the YAML extension), JetBrains IDEs, and other editors that support the yaml-language-server protocol. You can also use a local relative path (`$schema=schemas/dokploy.schema.json`) if you have a copy of the schema in your repo.

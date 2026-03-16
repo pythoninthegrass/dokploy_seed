@@ -17,7 +17,7 @@ Reproduces the prod "fuck47" project (static site) on Dokploy.
 ## Config
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/dokploy_seed/main/schemas/dokploy.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/icarus/main/schemas/dokploy.schema.json
 
 project:
   name: fuck47

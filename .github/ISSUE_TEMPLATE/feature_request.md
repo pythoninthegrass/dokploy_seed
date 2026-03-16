@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest an enhancement to dokploy_seed
+about: Suggest an enhancement to icarus
 labels: enhancement
 ---
 

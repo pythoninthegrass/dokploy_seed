@@ -65,5 +65,5 @@ This avoids the current problem where a project already exists on the server but
 - Helper `_make_project_all_response()` builds mock `project.all` responses
 
 ### Branch
-`004-import` worktree at `dokploy_seed.004-import/`
+`004-import` worktree at `icarus.004-import/`
 <!-- SECTION:NOTES:END -->

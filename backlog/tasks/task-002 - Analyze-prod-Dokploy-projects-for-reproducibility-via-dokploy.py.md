@@ -47,7 +47,7 @@ Audit the two projects currently running on the production Dokploy server (confi
 
 ### Worktree
 Branch: `task-002/analyze-prod-projects`
-Path: `~/git/dokploy_seed.task-002-analyze-prod-projects`
+Path: `~/git/icarus.task-002-analyze-prod-projects`
 
 ### Backlog Documents
 All deliverables stored in backlog docs (not repo files):

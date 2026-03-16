@@ -1,4 +1,4 @@
-"""Reusable Hypothesis strategies for dokploy_seed property tests."""
+"""Reusable Hypothesis strategies for icarus property tests."""
 
 from hypothesis import strategies as st
 

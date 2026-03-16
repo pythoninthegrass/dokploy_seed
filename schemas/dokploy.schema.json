@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/pythoninthegrass/dokploy_seed/main/schemas/dokploy.schema.json",
+  "$id": "https://raw.githubusercontent.com/pythoninthegrass/icarus/main/schemas/dokploy.schema.json",
   "title": "Dokploy deployment config",
   "type": "object",
   "required": [
