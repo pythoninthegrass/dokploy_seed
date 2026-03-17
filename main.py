@@ -316,10 +316,11 @@ def load_state(state_file: Path) -> dict:
     return json.loads(state_file.read_text())
 
 
-def save_state(state: dict, state_file: Path) -> None:
+def save_state(state: dict, state_file: Path, *, quiet: bool = False) -> None:
     state_file.parent.mkdir(parents=True, exist_ok=True)
     state_file.write_text(json.dumps(state, indent=2) + "\n")
-    print(f"State saved to {state_file}")
+    if not quiet:
+        print(f"State saved to {state_file}")
 
 
 def cmd_check(repo_root: Path) -> None:
@@ -495,6 +496,9 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
         app_name = result["appName"]
         state["apps"][name] = {"applicationId": app_id, "appName": app_name}
         print(f"  {name}: id={app_id} appName={app_name}")
+
+    # Save state early so destroy can clean up if later steps fail
+    save_state(state, state_file, quiet=True)
 
     # 4. Configure providers
     for app_def in cfg["apps"]:

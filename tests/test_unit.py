@@ -776,6 +776,98 @@ class TestCmdSetupVolumes:
         assert len(mount_calls) == 0
 
 
+class TestCmdSetupSavesStateOnFailure:
+    """cmd_setup saves state after project/app creation so destroy can clean up on later failures."""
+
+    def _mock_client_failing_on(self, fail_endpoint):
+        """Client that fails when a specific endpoint is called."""
+        def side_effect(endpoint, payload):
+            if endpoint == fail_endpoint:
+                raise Exception(f"Simulated failure on {endpoint}")
+            return {
+                "application.create": {"applicationId": "app-1", "appName": "app-abc"},
+                "project.create": {
+                    "project": {"projectId": "proj-1"},
+                    "environment": {"environmentId": "env-1"},
+                },
+            }.get(endpoint, {})
+
+        client = MagicMock()
+        client.post.side_effect = side_effect
+        client.get.return_value = []
+        return client
+
+    def test_state_saved_when_domain_creation_fails(self, tmp_path):
+        """State file exists after domain.create fails so destroy can clean up."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "domain": {"host": "example.com", "port": 80, "https": False, "certificateType": "none"},
+                }
+            ],
+        }
+        client = self._mock_client_failing_on("domain.create")
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+
+        with pytest.raises(Exception, match="Simulated failure"):
+            dokploy.cmd_setup(client, cfg, state_file)
+
+        assert state_file.exists()
+        state = json.loads(state_file.read_text())
+        assert state["projectId"] == "proj-1"
+        assert "app" in state["apps"]
+
+    def test_state_saved_when_mount_creation_fails(self, tmp_path):
+        """State file exists after mounts.create fails so destroy can clean up."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "volumes": [
+                        {"source": "data", "target": "/data", "type": "volume"},
+                    ],
+                }
+            ],
+        }
+        client = self._mock_client_failing_on("mounts.create")
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+
+        with pytest.raises(Exception, match="Simulated failure"):
+            dokploy.cmd_setup(client, cfg, state_file)
+
+        assert state_file.exists()
+        state = json.loads(state_file.read_text())
+        assert state["projectId"] == "proj-1"
+        assert "app" in state["apps"]
+
+    def test_no_state_saved_when_project_creation_fails(self, tmp_path):
+        """No state file when project.create itself fails — nothing to clean up."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                }
+            ],
+        }
+        client = self._mock_client_failing_on("project.create")
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+
+        with pytest.raises(Exception, match="Simulated failure"):
+            dokploy.cmd_setup(client, cfg, state_file)
+
+        assert not state_file.exists()
+
+
 def _state_with_app(app_name="web", app_id="app-123", dokploy_name="app-foo-bar-abc"):
     return {
         "projectId": "proj-1",
