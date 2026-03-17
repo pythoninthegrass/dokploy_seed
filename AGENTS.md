@@ -49,6 +49,8 @@ ic --env prod exec django -- python manage.py shell  # Run command
 
 ### Standalone (no install)
 
+Make sure to run `uv sync --all-extras` to get production and development dependencies first.
+
 ```bash
 uv run --script main.py --help            # Show usage
 uv run --script main.py check             # Pre-flight checks
