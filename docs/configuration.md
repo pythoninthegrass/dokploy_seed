@@ -68,6 +68,7 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | `apps[].dockerContextPath` | no | Docker build context path (for `buildType: dockerfile`) |
 | `apps[].dockerBuildStage` | no | Docker build target stage (for `buildType: dockerfile`) |
 | `apps[].publishDirectory` | no | Publish directory (for `buildType: static`) |
+| `apps[].isStaticSpa` | no | Single Page Application mode (for `buildType: static`) |
 | `apps[].autoDeploy` | no | Enable auto-deploy on push (`true`/`false`) |
 | `apps[].replicas` | no | Number of app replicas (integer, minimum 1) |
 | `apps[].buildPath` | no | Build path for GitHub provider (default: `/`) |

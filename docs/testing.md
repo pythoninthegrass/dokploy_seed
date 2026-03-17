@@ -59,10 +59,14 @@ tests/
   test_e2e.py              # E2E tests against a real Dokploy instance
   setup-dokploy.sh         # Reusable Dokploy bootstrap for E2E (Linux only)
   fixtures/
-    web_app_config.yml      # Realistic multi-app config (web, worker, redis)
-    minimal_config.yml      # Single-app config
-    docker_only_config.yml  # Docker-only stack (postgres, redis, app)
-    sample_state.yml       # State dict as saved by cmd_setup
+    web_app_config.yml          # Realistic multi-app config (web, worker, redis)
+    minimal_config.yml          # Single-app config
+    docker_only_config.yml      # Docker-only stack (postgres, redis, app)
+    github_static_config.yml    # GitHub static-site config (buildType, domain.path, etc.)
+    github_dockerfile_config.yml # GitHub dockerfile config (watchPaths, autoDeploy, etc.)
+    volumes_config.yml          # Config with volume mounts (volume and bind types)
+    schedules_config.yml        # Config with scheduled cron jobs
+    sample_state.yml            # State dict as saved by cmd_setup
 ```
 
 ## Fixture Architecture
@@ -91,6 +95,10 @@ The fixtures are simplified versions of the example configs (shorter commands, f
 | `web_app_config` | `web_app_config.yml` | Multi-app config with GitHub apps, Docker apps, domains, two environments |
 | `minimal_config` | `minimal_config.yml` | Single Docker app, one environment |
 | `docker_only_config` | `docker_only_config.yml` | Docker-only stack with inter-app env refs |
+| `github_static_config` | `github_static_config.yml` | GitHub static-site config with buildType, domain.path, etc. |
+| `github_dockerfile_config` | `github_dockerfile_config.yml` | GitHub dockerfile config with watchPaths, autoDeploy, etc. |
+| `volumes_config` | `volumes_config.yml` | Config with volume mounts (volume and bind types) |
+| `schedules_config` | `schedules_config.yml` | Config with scheduled cron jobs |
 | `sample_state` | `sample_state.yml` | State dict with `projectId`, `environmentId`, and app IDs |
 | `dokploy_yml` | *(generated)* | Writes `minimal_config` to a temp `dokploy.yml` file, returns the path |
 
