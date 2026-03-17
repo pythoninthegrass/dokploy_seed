@@ -1,10 +1,10 @@
 ---
 id: TASK-008
 title: Add `uv tool install` support with `ic` CLI entry point
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-07 06:42'
-updated_date: '2026-03-07 06:43'
+updated_date: '2026-03-17 05:57'
 labels:
   - enhancement
   - cli
