@@ -33,6 +33,7 @@ import copy
 import docker
 import httpx
 import json
+import paramiko
 import re
 import sys
 import yaml
@@ -217,14 +218,13 @@ def build_build_type_payload(app_id: str, app_def: dict) -> dict:
     payload: dict = {
         "applicationId": app_id,
         "buildType": build_type,
+        "dockerfile": app_def.get("dockerfile", "Dockerfile") if build_type == "dockerfile" else None,
         "dockerContextPath": app_def.get("dockerContextPath", ""),
         "dockerBuildStage": app_def.get("dockerBuildStage", ""),
         "herokuVersion": None,
         "railpackVersion": None,
     }
-    if build_type == "dockerfile":
-        payload["dockerfile"] = app_def.get("dockerfile", "Dockerfile")
-    elif build_type == "static":
+    if build_type == "static":
         payload["publishDirectory"] = app_def.get("publishDirectory", "")
         payload["isStaticSpa"] = app_def.get("isStaticSpa", False)
     return payload
@@ -643,16 +643,18 @@ def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path)
     print("\nEnvironment variables pushed.")
 
 
-def cmd_trigger(client: DokployClient, cfg: dict, state_file: Path) -> None:
+def cmd_trigger(client: DokployClient, cfg: dict, state_file: Path, *, redeploy: bool = False) -> None:
     state = load_state(state_file)
     deploy_order = cfg["project"].get("deploy_order", [])
+    endpoint = "application.redeploy" if redeploy else "application.deploy"
+    action = "Redeploying" if redeploy else "Deploying"
 
     for i, wave in enumerate(deploy_order, 1):
         print(f"Wave {i}: {', '.join(wave)}")
         for name in wave:
             app_id = state["apps"][name]["applicationId"]
-            print(f"  Deploying {name}...")
-            client.post("application.deploy", {"applicationId": app_id})
+            print(f"  {action} {name}...")
+            client.post(endpoint, {"applicationId": app_id})
             print(f"    {name} deploy triggered.")
 
     print("\nAll deploys triggered.")
@@ -662,10 +664,12 @@ def cmd_deploy(repo_root: Path, client: DokployClient, cfg: dict, state_file: Pa
     print("\n==> Phase 1/4: check")
     cmd_check(repo_root)
 
+    is_redeploy = False
     if state_file.exists():
         state = load_state(state_file)
         if validate_state(client, state):
             print("\n==> Phase 2/4: setup (skipped, state file exists)")
+            is_redeploy = True
         else:
             print("\n==> Phase 2/4: setup (state orphaned, recreating)")
             state_file.unlink()
@@ -677,8 +681,11 @@ def cmd_deploy(repo_root: Path, client: DokployClient, cfg: dict, state_file: Pa
     print("\n==> Phase 3/4: env")
     cmd_env(client, cfg, state_file, repo_root)
 
+    if is_redeploy:
+        cleanup_stale_routes(load_state(state_file), cfg)
+
     print("\n==> Phase 4/4: trigger")
-    cmd_trigger(client, cfg, state_file)
+    cmd_trigger(client, cfg, state_file, redeploy=is_redeploy)
 
 
 def cmd_status(client: DokployClient, state_file: Path) -> None:
@@ -718,6 +725,98 @@ def get_docker_client(ssh_cfg: dict) -> docker.DockerClient:
     """Create a Docker client connected via SSH."""
     url = build_docker_url(ssh_cfg)
     return docker.DockerClient(base_url=url, use_ssh_client=True)
+
+
+TRAEFIK_DYNAMIC_DIR = "/etc/dokploy/traefik/dynamic"
+
+
+def collect_domains(cfg: dict) -> set[str]:
+    """Extract all configured domain hostnames from app definitions."""
+    domains: set[str] = set()
+    for app_def in cfg.get("apps", []):
+        domain_cfg = app_def.get("domain")
+        if not domain_cfg:
+            continue
+        domain_list = domain_cfg if isinstance(domain_cfg, list) else [domain_cfg]
+        for dom in domain_list:
+            domains.add(dom["host"])
+    return domains
+
+
+def find_stale_app_names(current_app_names: set[str], domains: set[str], traefik_files: dict[str, str]) -> set[str]:
+    """Identify app names with traefik configs routing to our domains but not in current state.
+
+    Args:
+        current_app_names: appNames from the current deployment state.
+        domains: hostnames this deployment owns.
+        traefik_files: mapping of appName -> content/Host rules from traefik config files.
+
+    Returns:
+        Set of stale app names to clean up.
+    """
+    if not domains:
+        return set()
+    stale: set[str] = set()
+    for app_name, content in traefik_files.items():
+        if app_name in current_app_names:
+            continue
+        if not app_name.startswith("app-"):
+            continue
+        for domain in domains:
+            if f"Host(`{domain}`)" in content:
+                stale.add(app_name)
+                break
+    return stale
+
+
+def _ssh_exec(ssh: paramiko.SSHClient, cmd: str) -> str:
+    """Run a command over SSH and return stdout."""
+    _, stdout, _ = ssh.exec_command(cmd)
+    return stdout.read().decode().strip()
+
+
+def cleanup_stale_routes(state: dict, cfg: dict) -> None:
+    """Remove traefik configs and docker services for orphaned deployments.
+
+    Skips gracefully if DOKPLOY_SSH_HOST is not configured.
+    """
+    host: str = config("DOKPLOY_SSH_HOST", default="")  # type: ignore[assignment]
+    if not host:
+        print("  Cleanup: skipping (DOKPLOY_SSH_HOST not set)")
+        return
+
+    domains = collect_domains(cfg)
+    if not domains:
+        return
+
+    current_app_names = {info["appName"] for info in state["apps"].values()}
+    user: str = config("DOKPLOY_SSH_USER", default="root")  # type: ignore[assignment]
+    port: int = int(config("DOKPLOY_SSH_PORT", default="22"))  # type: ignore[assignment]
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(host, port=port, username=user)
+
+        traefik_files: dict[str, str] = {}
+        file_list = _ssh_exec(ssh, f"ls {TRAEFIK_DYNAMIC_DIR}/*.yml 2>/dev/null")
+        for filepath in file_list.splitlines():
+            app_name = filepath.rsplit("/", 1)[-1].removesuffix(".yml")
+            content = _ssh_exec(ssh, f"cat {filepath}")
+            traefik_files[app_name] = content
+
+        stale = find_stale_app_names(current_app_names, domains, traefik_files)
+        if not stale:
+            return
+
+        print(f"  Cleaning up {len(stale)} stale route(s)...")
+        for app_name in sorted(stale):
+            config_path = f"{TRAEFIK_DYNAMIC_DIR}/{app_name}.yml"
+            _ssh_exec(ssh, f"rm -f {config_path}")
+            _ssh_exec(ssh, f"docker service rm {app_name} 2>/dev/null")
+            print(f"    Removed: {app_name}")
+    finally:
+        ssh.close()
 
 
 def get_containers(client: DokployClient, app_name: str) -> list[dict]:
@@ -979,7 +1078,7 @@ def main() -> None:
         case "deploy":
             cmd_deploy(repo_root, client, cfg, state_file)
         case "trigger":
-            cmd_trigger(client, cfg, state_file)
+            cmd_trigger(client, cfg, state_file, redeploy=True)
         case "status":
             cmd_status(client, state_file)
         case "destroy":

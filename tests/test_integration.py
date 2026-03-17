@@ -695,6 +695,46 @@ class TestCmdTrigger:
         # Should not raise despite empty response
         dokploy.cmd_trigger(client, minimal_config, state_file)
 
+    def test_redeploy_uses_redeploy_endpoint(self, tmp_path, minimal_config):
+        """When redeploy=True, cmd_trigger calls application.redeploy."""
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        router = respx.Router()
+        deploy_route = router.post(f"{BASE_URL}/api/application.deploy").mock(return_value=httpx.Response(200, content=b""))
+        redeploy_route = router.post(f"{BASE_URL}/api/application.redeploy").mock(return_value=httpx.Response(200, content=b""))
+        client = _make_client(router)
+
+        dokploy.cmd_trigger(client, minimal_config, state_file, redeploy=True)
+
+        assert len(redeploy_route.calls) == 1
+        assert len(deploy_route.calls) == 0
+
+    def test_default_uses_deploy_endpoint(self, tmp_path, minimal_config):
+        """When redeploy not specified, cmd_trigger calls application.deploy."""
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"app": {"applicationId": "app-1", "appName": "app-gen"}},
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        self._write_state(state_file, state)
+
+        router = respx.Router()
+        deploy_route = router.post(f"{BASE_URL}/api/application.deploy").mock(return_value=httpx.Response(200, content=b""))
+        redeploy_route = router.post(f"{BASE_URL}/api/application.redeploy").mock(return_value=httpx.Response(200, content=b""))
+        client = _make_client(router)
+
+        dokploy.cmd_trigger(client, minimal_config, state_file)
+
+        assert len(deploy_route.calls) == 1
+        assert len(redeploy_route.calls) == 0
+
 
 # ---------------------------------------------------------------------------
 # cmd_status tests

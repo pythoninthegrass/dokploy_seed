@@ -344,6 +344,7 @@ class TestBuildBuildTypePayload:
         assert result == {
             "applicationId": "app-1",
             "buildType": "static",
+            "dockerfile": None,
             "publishDirectory": "dist",
             "isStaticSpa": False,
             "dockerContextPath": "",
@@ -351,7 +352,6 @@ class TestBuildBuildTypePayload:
             "herokuVersion": None,
             "railpackVersion": None,
         }
-        assert "dockerfile" not in result
 
     def test_static_default_publish_directory(self):
         """Static buildType without publishDirectory defaults to empty string."""
@@ -364,6 +364,7 @@ class TestBuildBuildTypePayload:
         assert result == {
             "applicationId": "app-1",
             "buildType": "nixpacks",
+            "dockerfile": None,
             "dockerContextPath": "",
             "dockerBuildStage": "",
             "herokuVersion": None,
@@ -371,9 +372,10 @@ class TestBuildBuildTypePayload:
         }
 
     def test_all_build_types_include_required_api_fields(self):
-        """Dokploy API requires dockerContextPath, dockerBuildStage, herokuVersion, railpackVersion for all build types."""
+        """Dokploy API requires dockerfile, dockerContextPath, dockerBuildStage, herokuVersion, railpackVersion for all build types."""
         for build_type in ("dockerfile", "static", "nixpacks", "heroku_buildpacks"):
             result = dokploy.build_build_type_payload("app-1", {"name": "x", "buildType": build_type})
+            assert "dockerfile" in result, f"missing dockerfile for {build_type}"
             assert "dockerContextPath" in result, f"missing dockerContextPath for {build_type}"
             assert "dockerBuildStage" in result, f"missing dockerBuildStage for {build_type}"
             assert "herokuVersion" in result, f"missing herokuVersion for {build_type}"
@@ -615,7 +617,7 @@ class TestUnifiedDeploy:
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: calls.append("check"))
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: calls.append("setup"))
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf: calls.append("trigger"))
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
 
         dokploy.cmd_deploy(
             repo_root=tmp_path,
@@ -636,7 +638,7 @@ class TestUnifiedDeploy:
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: calls.append("check"))
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: calls.append("setup"))
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf: calls.append("trigger"))
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
         monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
 
         dokploy.cmd_deploy(
@@ -649,6 +651,51 @@ class TestUnifiedDeploy:
         assert "setup" not in calls
         assert calls == ["check", "env", "trigger"]
 
+    def test_existing_project_passes_redeploy_true(self, tmp_path, monkeypatch):
+        """Existing project passes redeploy=True to cmd_trigger."""
+        trigger_kwargs = {}
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text("{}")
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(
+            dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
+        )
+        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
+
+        dokploy.cmd_deploy(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert trigger_kwargs["redeploy"] is True
+
+    def test_fresh_project_passes_redeploy_false(self, tmp_path, monkeypatch):
+        """Fresh project passes redeploy=False to cmd_trigger."""
+        trigger_kwargs = {}
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(
+            dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
+        )
+
+        dokploy.cmd_deploy(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert trigger_kwargs["redeploy"] is False
+
     def test_phase_headers_printed(self, tmp_path, monkeypatch, capsys):
         """Each phase prints a header like '==> Phase N/4: ...'."""
         state_file = tmp_path / ".dokploy-state" / "prod.json"
@@ -656,7 +703,7 @@ class TestUnifiedDeploy:
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: None)
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf: None)
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
 
         dokploy.cmd_deploy(
             repo_root=tmp_path,
@@ -683,7 +730,7 @@ class TestUnifiedDeploy:
         monkeypatch.setattr(dokploy, "cmd_check", failing_check)
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: calls.append("setup"))
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf: calls.append("trigger"))
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
 
         with pytest.raises(SystemExit):
             dokploy.cmd_deploy(
@@ -694,6 +741,140 @@ class TestUnifiedDeploy:
             )
 
         assert calls == ["check"]
+
+
+class TestCleanupStaleRoutes:
+    def test_identifies_stale_configs(self):
+        """Finds traefik configs that route to our domain but belong to old app names."""
+        current_app_names = {"app-new-abc123"}
+        domains = {"example.com"}
+        traefik_files = {
+            "app-old-xyz789": "Host(`example.com`)",
+            "app-new-abc123": "Host(`example.com`)",
+            "app-other-def456": "Host(`other.com`)",
+        }
+        stale = dokploy.find_stale_app_names(current_app_names, domains, traefik_files)
+        assert stale == {"app-old-xyz789"}
+
+    def test_no_stale_when_only_current(self):
+        """No stale configs when only the current app routes to our domain."""
+        current_app_names = {"app-current-abc123"}
+        domains = {"example.com"}
+        traefik_files = {
+            "app-current-abc123": "Host(`example.com`)",
+        }
+        stale = dokploy.find_stale_app_names(current_app_names, domains, traefik_files)
+        assert stale == set()
+
+    def test_multiple_domains(self):
+        """Detects stale configs across multiple domains."""
+        current_app_names = {"app-web-abc", "app-api-def"}
+        domains = {"web.example.com", "api.example.com"}
+        traefik_files = {
+            "app-web-abc": "Host(`web.example.com`)",
+            "app-api-def": "Host(`api.example.com`)",
+            "app-old-web-xyz": "Host(`web.example.com`)",
+            "app-old-api-uvw": "Host(`api.example.com`)",
+            "app-unrelated-zzz": "Host(`unrelated.com`)",
+        }
+        stale = dokploy.find_stale_app_names(current_app_names, domains, traefik_files)
+        assert stale == {"app-old-web-xyz", "app-old-api-uvw"}
+
+    def test_ignores_non_app_configs(self):
+        """Skips system configs like dokploy.yml and middlewares.yml."""
+        current_app_names = {"app-new-abc"}
+        domains = {"example.com"}
+        traefik_files = {
+            "app-new-abc": "Host(`example.com`)",
+            "dokploy": "Host(`dokploy.example.com`)",
+            "middlewares": "",
+        }
+        stale = dokploy.find_stale_app_names(current_app_names, domains, traefik_files)
+        assert stale == set()
+
+    def test_empty_domains_returns_empty(self):
+        """No cleanup needed when no domains are configured."""
+        stale = dokploy.find_stale_app_names({"app-abc"}, set(), {})
+        assert stale == set()
+
+    def test_collect_domains_from_config(self):
+        """Extracts domains from app definitions."""
+        cfg = {
+            "apps": [
+                {
+                    "name": "web",
+                    "domain": {"host": "web.example.com", "port": 80, "https": True, "certificateType": "letsencrypt"},
+                },
+                {
+                    "name": "api",
+                    "domain": [
+                        {"host": "api.example.com", "port": 80, "https": True, "certificateType": "letsencrypt"},
+                        {"host": "api2.example.com", "port": 80, "https": True, "certificateType": "letsencrypt"},
+                    ],
+                },
+                {"name": "worker"},
+            ],
+        }
+        domains = dokploy.collect_domains(cfg)
+        assert domains == {"web.example.com", "api.example.com", "api2.example.com"}
+
+    def test_cleanup_called_during_redeploy(self, tmp_path, monkeypatch):
+        """cmd_deploy calls cleanup_stale_routes when redeploying."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text("{}")
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
+
+        dokploy.cmd_deploy(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "cleanup" in calls
+
+    def test_cleanup_not_called_on_fresh_deploy(self, tmp_path, monkeypatch):
+        """cmd_deploy does not call cleanup_stale_routes on fresh deploy."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
+
+        dokploy.cmd_deploy(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "cleanup" not in calls
+
+    def test_cleanup_skipped_when_no_ssh_config(self, monkeypatch, capsys):
+        """cleanup_stale_routes skips gracefully when DOKPLOY_SSH_HOST is not set."""
+        monkeypatch.setattr(dokploy, "config", MagicMock(side_effect=lambda key, default="": default))
+
+        state = {"apps": {"web": {"appName": "app-web-abc"}}}
+        cfg = {
+            "apps": [
+                {"name": "web", "domain": {"host": "example.com", "port": 80, "https": True, "certificateType": "letsencrypt"}}
+            ]
+        }
+
+        dokploy.cleanup_stale_routes(state, cfg)
+
+        output = capsys.readouterr().out
+        assert "skipping" in output.lower() or output == ""
 
 
 class TestCmdSetupVolumes:
@@ -781,6 +962,7 @@ class TestCmdSetupSavesStateOnFailure:
 
     def _mock_client_failing_on(self, fail_endpoint):
         """Client that fails when a specific endpoint is called."""
+
         def side_effect(endpoint, payload):
             if endpoint == fail_endpoint:
                 raise Exception(f"Simulated failure on {endpoint}")
