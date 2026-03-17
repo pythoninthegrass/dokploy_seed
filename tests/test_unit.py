@@ -485,7 +485,7 @@ class TestBuildMountPayload:
         mount = {"source": "app_data", "target": "/data", "type": "volume"}
         result = dokploy.build_mount_payload("app-1", mount)
         assert result == {
-            "applicationId": "app-1",
+            "serviceId": "app-1",
             "type": "volume",
             "volumeName": "app_data",
             "mountPath": "/data",
@@ -497,7 +497,7 @@ class TestBuildMountPayload:
         mount = {"source": "/host/data", "target": "/container/data", "type": "bind"}
         result = dokploy.build_mount_payload("app-1", mount)
         assert result == {
-            "applicationId": "app-1",
+            "serviceId": "app-1",
             "type": "bind",
             "hostPath": "/host/data",
             "mountPath": "/container/data",

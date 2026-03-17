@@ -28,7 +28,7 @@ Requires the `x-api-key` header.
 
 - **`application.saveEnvironment`**: `createEnvFile` (boolean) became a required field in Dokploy v0.28.4 (added in v0.26.1 as optional, promoted to required later). Controls whether env vars are written to a `.env` file in the container's working directory. Set `false` to preserve pre-v0.26.1 behavior (env vars injected as process environment only).
 
-- **`mounts.create`**: Creates a persistent mount for an application. Required fields: `type` (`volume` or `bind`), `mountPath` (container path), `serviceType` (`application`), `applicationId`. For `type: volume`, send `volumeName`; for `type: bind`, send `hostPath`.
+- **`mounts.create`**: Creates a persistent mount for an application. Required fields: `type` (`volume` or `bind`), `mountPath` (container path), `serviceId` (the application ID). Optional: `serviceType` (defaults to `application`). For `type: volume`, send `volumeName`; for `type: bind`, send `hostPath`. Note: the schema uses `additionalProperties: false` — do not send `applicationId`.
 
 - **`application.deploy`** returns an empty response body on success. Since v0.26.2, deployments execute asynchronously in the background — the endpoint returns immediately.
 

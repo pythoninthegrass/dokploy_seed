@@ -260,7 +260,7 @@ def build_app_settings_payload(app_id: str, app_def: dict) -> dict | None:
 def build_mount_payload(app_id: str, mount: dict) -> dict:
     """Build payload for mounts.create."""
     payload = {
-        "applicationId": app_id,
+        "serviceId": app_id,
         "type": mount["type"],
         "mountPath": mount["target"],
         "serviceType": "application",
