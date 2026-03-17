@@ -79,6 +79,12 @@ def volumes_config():
 
 
 @pytest.fixture
+def schedules_config():
+    """Config with scheduled cron jobs."""
+    return _load_fixture("schedules_config.yml")
+
+
+@pytest.fixture
 def dokploy_yml(tmp_path, minimal_config):
     """Write a minimal dokploy.yml in tmp_path and return the path."""
     config_file = tmp_path / "dokploy.yml"

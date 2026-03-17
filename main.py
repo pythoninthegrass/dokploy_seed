@@ -33,6 +33,7 @@ import copy
 import docker
 import httpx
 import json
+import paramiko
 import re
 import sys
 import yaml
@@ -217,14 +218,13 @@ def build_build_type_payload(app_id: str, app_def: dict) -> dict:
     payload: dict = {
         "applicationId": app_id,
         "buildType": build_type,
+        "dockerfile": app_def.get("dockerfile", "Dockerfile") if build_type == "dockerfile" else None,
         "dockerContextPath": app_def.get("dockerContextPath", ""),
         "dockerBuildStage": app_def.get("dockerBuildStage", ""),
         "herokuVersion": None,
         "railpackVersion": None,
     }
-    if build_type == "dockerfile":
-        payload["dockerfile"] = app_def.get("dockerfile", "Dockerfile")
-    elif build_type == "static":
+    if build_type == "static":
         payload["publishDirectory"] = app_def.get("publishDirectory", "")
         payload["isStaticSpa"] = app_def.get("isStaticSpa", False)
     return payload
@@ -272,6 +272,94 @@ def build_mount_payload(app_id: str, mount: dict) -> dict:
     return payload
 
 
+def build_schedule_payload(app_id: str, sched: dict) -> dict:
+    """Build payload for schedule.create."""
+    payload = {
+        "name": sched["name"],
+        "cronExpression": sched["cronExpression"],
+        "command": sched["command"],
+        "scheduleType": "application",
+        "applicationId": app_id,
+        "shellType": sched.get("shellType", "bash"),
+        "enabled": sched.get("enabled", True),
+    }
+    if "timezone" in sched:
+        payload["timezone"] = sched["timezone"]
+    return payload
+
+
+def reconcile_schedules(
+    client: "DokployClient",
+    app_id: str,
+    existing: list[dict],
+    desired: list[dict],
+) -> dict:
+    """Reconcile schedules: update existing by name, create new, delete removed.
+
+    Returns a dict mapping schedule name -> {"scheduleId": ...} for state storage.
+    """
+    existing_by_name = {s["name"]: s for s in existing}
+    desired_by_name = {s["name"]: s for s in desired}
+
+    result_state = {}
+
+    for name, sched in desired_by_name.items():
+        payload = build_schedule_payload(app_id, sched)
+        if name in existing_by_name:
+            ex = existing_by_name[name]
+            schedule_id = ex["scheduleId"]
+            needs_update = (
+                payload.get("cronExpression") != ex.get("cronExpression")
+                or payload.get("command") != ex.get("command")
+                or payload.get("shellType") != ex.get("shellType")
+                or payload.get("enabled") != ex.get("enabled")
+                or payload.get("timezone") != ex.get("timezone")
+            )
+            if needs_update:
+                update_payload = {**payload, "scheduleId": schedule_id}
+                update_payload.pop("applicationId", None)
+                update_payload.pop("scheduleType", None)
+                client.post("schedule.update", update_payload)
+            result_state[name] = {"scheduleId": schedule_id}
+        else:
+            resp = client.post("schedule.create", payload)
+            result_state[name] = {"scheduleId": resp["scheduleId"]}
+
+    for name, ex in existing_by_name.items():
+        if name not in desired_by_name:
+            client.post("schedule.delete", {"scheduleId": ex["scheduleId"]})
+
+    return result_state
+
+
+def reconcile_app_schedules(
+    client: "DokployClient",
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+) -> None:
+    """Reconcile schedules for all apps on redeploy."""
+    changed = False
+    for app_def in cfg.get("apps", []):
+        schedules = app_def.get("schedules")
+        if schedules is None and "schedules" not in state["apps"].get(app_def["name"], {}):
+            continue
+        name = app_def["name"]
+        app_id = state["apps"][name]["applicationId"]
+        existing = client.get(
+            "schedule.list",
+            {"id": app_id, "scheduleType": "application"},
+        )
+        if not isinstance(existing, list):
+            existing = []
+        desired = schedules or []
+        new_state = reconcile_schedules(client, app_id, existing, desired)
+        state["apps"][name]["schedules"] = new_state
+        changed = True
+    if changed:
+        save_state(state, state_file)
+
+
 class DokployClient:
     """Thin httpx wrapper for Dokploy API."""
 
@@ -316,10 +404,11 @@ def load_state(state_file: Path) -> dict:
     return json.loads(state_file.read_text())
 
 
-def save_state(state: dict, state_file: Path) -> None:
+def save_state(state: dict, state_file: Path, *, quiet: bool = False) -> None:
     state_file.parent.mkdir(parents=True, exist_ok=True)
     state_file.write_text(json.dumps(state, indent=2) + "\n")
-    print(f"State saved to {state_file}")
+    if not quiet:
+        print(f"State saved to {state_file}")
 
 
 def cmd_check(repo_root: Path) -> None:
@@ -496,6 +585,9 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
         state["apps"][name] = {"applicationId": app_id, "appName": app_name}
         print(f"  {name}: id={app_id} appName={app_name}")
 
+    # Save state early so destroy can clean up if later steps fail
+    save_state(state, state_file, quiet=True)
+
     # 4. Configure providers
     for app_def in cfg["apps"]:
         name = app_def["name"]
@@ -574,7 +666,21 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
             mount_payload = build_mount_payload(app_id, vol)
             client.post("mounts.create", mount_payload)
 
-    # 9. Save state
+    # 9. Schedules
+    for app_def in cfg["apps"]:
+        schedules = app_def.get("schedules")
+        if not schedules:
+            continue
+        name = app_def["name"]
+        app_id = state["apps"][name]["applicationId"]
+        state["apps"][name]["schedules"] = {}
+        for sched in schedules:
+            print(f"Creating schedule for {name}: {sched['name']}...")
+            sched_payload = build_schedule_payload(app_id, sched)
+            resp = client.post("schedule.create", sched_payload)
+            state["apps"][name]["schedules"][sched["name"]] = {"scheduleId": resp["scheduleId"]}
+
+    # 10. Save state
     save_state(state, state_file)
     print("\nSetup complete!")
     print(f"  Project: {project_id}")
@@ -639,16 +745,18 @@ def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path)
     print("\nEnvironment variables pushed.")
 
 
-def cmd_trigger(client: DokployClient, cfg: dict, state_file: Path) -> None:
+def cmd_trigger(client: DokployClient, cfg: dict, state_file: Path, *, redeploy: bool = False) -> None:
     state = load_state(state_file)
     deploy_order = cfg["project"].get("deploy_order", [])
+    endpoint = "application.redeploy" if redeploy else "application.deploy"
+    action = "Redeploying" if redeploy else "Deploying"
 
     for i, wave in enumerate(deploy_order, 1):
         print(f"Wave {i}: {', '.join(wave)}")
         for name in wave:
             app_id = state["apps"][name]["applicationId"]
-            print(f"  Deploying {name}...")
-            client.post("application.deploy", {"applicationId": app_id})
+            print(f"  {action} {name}...")
+            client.post(endpoint, {"applicationId": app_id})
             print(f"    {name} deploy triggered.")
 
     print("\nAll deploys triggered.")
@@ -658,10 +766,12 @@ def cmd_deploy(repo_root: Path, client: DokployClient, cfg: dict, state_file: Pa
     print("\n==> Phase 1/4: check")
     cmd_check(repo_root)
 
+    is_redeploy = False
     if state_file.exists():
         state = load_state(state_file)
         if validate_state(client, state):
             print("\n==> Phase 2/4: setup (skipped, state file exists)")
+            is_redeploy = True
         else:
             print("\n==> Phase 2/4: setup (state orphaned, recreating)")
             state_file.unlink()
@@ -673,8 +783,12 @@ def cmd_deploy(repo_root: Path, client: DokployClient, cfg: dict, state_file: Pa
     print("\n==> Phase 3/4: env")
     cmd_env(client, cfg, state_file, repo_root)
 
+    if is_redeploy:
+        cleanup_stale_routes(load_state(state_file), cfg)
+        reconcile_app_schedules(client, cfg, load_state(state_file), state_file)
+
     print("\n==> Phase 4/4: trigger")
-    cmd_trigger(client, cfg, state_file)
+    cmd_trigger(client, cfg, state_file, redeploy=is_redeploy)
 
 
 def cmd_status(client: DokployClient, state_file: Path) -> None:
@@ -714,6 +828,98 @@ def get_docker_client(ssh_cfg: dict) -> docker.DockerClient:
     """Create a Docker client connected via SSH."""
     url = build_docker_url(ssh_cfg)
     return docker.DockerClient(base_url=url, use_ssh_client=True)
+
+
+TRAEFIK_DYNAMIC_DIR = "/etc/dokploy/traefik/dynamic"
+
+
+def collect_domains(cfg: dict) -> set[str]:
+    """Extract all configured domain hostnames from app definitions."""
+    domains: set[str] = set()
+    for app_def in cfg.get("apps", []):
+        domain_cfg = app_def.get("domain")
+        if not domain_cfg:
+            continue
+        domain_list = domain_cfg if isinstance(domain_cfg, list) else [domain_cfg]
+        for dom in domain_list:
+            domains.add(dom["host"])
+    return domains
+
+
+def find_stale_app_names(current_app_names: set[str], domains: set[str], traefik_files: dict[str, str]) -> set[str]:
+    """Identify app names with traefik configs routing to our domains but not in current state.
+
+    Args:
+        current_app_names: appNames from the current deployment state.
+        domains: hostnames this deployment owns.
+        traefik_files: mapping of appName -> content/Host rules from traefik config files.
+
+    Returns:
+        Set of stale app names to clean up.
+    """
+    if not domains:
+        return set()
+    stale: set[str] = set()
+    for app_name, content in traefik_files.items():
+        if app_name in current_app_names:
+            continue
+        if not app_name.startswith("app-"):
+            continue
+        for domain in domains:
+            if f"Host(`{domain}`)" in content:
+                stale.add(app_name)
+                break
+    return stale
+
+
+def _ssh_exec(ssh: paramiko.SSHClient, cmd: str) -> str:
+    """Run a command over SSH and return stdout."""
+    _, stdout, _ = ssh.exec_command(cmd)
+    return stdout.read().decode().strip()
+
+
+def cleanup_stale_routes(state: dict, cfg: dict) -> None:
+    """Remove traefik configs and docker services for orphaned deployments.
+
+    Skips gracefully if DOKPLOY_SSH_HOST is not configured.
+    """
+    host: str = config("DOKPLOY_SSH_HOST", default="")  # type: ignore[assignment]
+    if not host:
+        print("  Cleanup: skipping (DOKPLOY_SSH_HOST not set)")
+        return
+
+    domains = collect_domains(cfg)
+    if not domains:
+        return
+
+    current_app_names = {info["appName"] for info in state["apps"].values()}
+    user: str = config("DOKPLOY_SSH_USER", default="root")  # type: ignore[assignment]
+    port: int = int(config("DOKPLOY_SSH_PORT", default="22"))  # type: ignore[assignment]
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(host, port=port, username=user)
+
+        traefik_files: dict[str, str] = {}
+        file_list = _ssh_exec(ssh, f"ls {TRAEFIK_DYNAMIC_DIR}/*.yml 2>/dev/null")
+        for filepath in file_list.splitlines():
+            app_name = filepath.rsplit("/", 1)[-1].removesuffix(".yml")
+            content = _ssh_exec(ssh, f"cat {filepath}")
+            traefik_files[app_name] = content
+
+        stale = find_stale_app_names(current_app_names, domains, traefik_files)
+        if not stale:
+            return
+
+        print(f"  Cleaning up {len(stale)} stale route(s)...")
+        for app_name in sorted(stale):
+            config_path = f"{TRAEFIK_DYNAMIC_DIR}/{app_name}.yml"
+            _ssh_exec(ssh, f"rm -f {config_path}")
+            _ssh_exec(ssh, f"docker service rm {app_name} 2>/dev/null")
+            print(f"    Removed: {app_name}")
+    finally:
+        ssh.close()
 
 
 def get_containers(client: DokployClient, app_name: str) -> list[dict]:
@@ -975,7 +1181,7 @@ def main() -> None:
         case "deploy":
             cmd_deploy(repo_root, client, cfg, state_file)
         case "trigger":
-            cmd_trigger(client, cfg, state_file)
+            cmd_trigger(client, cfg, state_file, redeploy=True)
         case "status":
             cmd_status(client, state_file)
         case "destroy":

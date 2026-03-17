@@ -344,6 +344,7 @@ class TestBuildBuildTypePayload:
         assert result == {
             "applicationId": "app-1",
             "buildType": "static",
+            "dockerfile": None,
             "publishDirectory": "dist",
             "isStaticSpa": False,
             "dockerContextPath": "",
@@ -351,7 +352,6 @@ class TestBuildBuildTypePayload:
             "herokuVersion": None,
             "railpackVersion": None,
         }
-        assert "dockerfile" not in result
 
     def test_static_default_publish_directory(self):
         """Static buildType without publishDirectory defaults to empty string."""
@@ -364,6 +364,7 @@ class TestBuildBuildTypePayload:
         assert result == {
             "applicationId": "app-1",
             "buildType": "nixpacks",
+            "dockerfile": None,
             "dockerContextPath": "",
             "dockerBuildStage": "",
             "herokuVersion": None,
@@ -371,9 +372,10 @@ class TestBuildBuildTypePayload:
         }
 
     def test_all_build_types_include_required_api_fields(self):
-        """Dokploy API requires dockerContextPath, dockerBuildStage, herokuVersion, railpackVersion for all build types."""
+        """Dokploy API requires dockerfile, dockerContextPath, dockerBuildStage, herokuVersion, railpackVersion for all build types."""
         for build_type in ("dockerfile", "static", "nixpacks", "heroku_buildpacks"):
             result = dokploy.build_build_type_payload("app-1", {"name": "x", "buildType": build_type})
+            assert "dockerfile" in result, f"missing dockerfile for {build_type}"
             assert "dockerContextPath" in result, f"missing dockerContextPath for {build_type}"
             assert "dockerBuildStage" in result, f"missing dockerBuildStage for {build_type}"
             assert "herokuVersion" in result, f"missing herokuVersion for {build_type}"
@@ -615,7 +617,7 @@ class TestUnifiedDeploy:
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: calls.append("check"))
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: calls.append("setup"))
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf: calls.append("trigger"))
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
 
         dokploy.cmd_deploy(
             repo_root=tmp_path,
@@ -636,7 +638,7 @@ class TestUnifiedDeploy:
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: calls.append("check"))
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: calls.append("setup"))
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf: calls.append("trigger"))
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
         monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
 
         dokploy.cmd_deploy(
@@ -649,6 +651,51 @@ class TestUnifiedDeploy:
         assert "setup" not in calls
         assert calls == ["check", "env", "trigger"]
 
+    def test_existing_project_passes_redeploy_true(self, tmp_path, monkeypatch):
+        """Existing project passes redeploy=True to cmd_trigger."""
+        trigger_kwargs = {}
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text("{}")
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(
+            dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
+        )
+        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
+
+        dokploy.cmd_deploy(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert trigger_kwargs["redeploy"] is True
+
+    def test_fresh_project_passes_redeploy_false(self, tmp_path, monkeypatch):
+        """Fresh project passes redeploy=False to cmd_trigger."""
+        trigger_kwargs = {}
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(
+            dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
+        )
+
+        dokploy.cmd_deploy(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert trigger_kwargs["redeploy"] is False
+
     def test_phase_headers_printed(self, tmp_path, monkeypatch, capsys):
         """Each phase prints a header like '==> Phase N/4: ...'."""
         state_file = tmp_path / ".dokploy-state" / "prod.json"
@@ -656,7 +703,7 @@ class TestUnifiedDeploy:
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: None)
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf: None)
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
 
         dokploy.cmd_deploy(
             repo_root=tmp_path,
@@ -683,7 +730,7 @@ class TestUnifiedDeploy:
         monkeypatch.setattr(dokploy, "cmd_check", failing_check)
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: calls.append("setup"))
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf: calls.append("trigger"))
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
 
         with pytest.raises(SystemExit):
             dokploy.cmd_deploy(
@@ -694,6 +741,140 @@ class TestUnifiedDeploy:
             )
 
         assert calls == ["check"]
+
+
+class TestCleanupStaleRoutes:
+    def test_identifies_stale_configs(self):
+        """Finds traefik configs that route to our domain but belong to old app names."""
+        current_app_names = {"app-new-abc123"}
+        domains = {"example.com"}
+        traefik_files = {
+            "app-old-xyz789": "Host(`example.com`)",
+            "app-new-abc123": "Host(`example.com`)",
+            "app-other-def456": "Host(`other.com`)",
+        }
+        stale = dokploy.find_stale_app_names(current_app_names, domains, traefik_files)
+        assert stale == {"app-old-xyz789"}
+
+    def test_no_stale_when_only_current(self):
+        """No stale configs when only the current app routes to our domain."""
+        current_app_names = {"app-current-abc123"}
+        domains = {"example.com"}
+        traefik_files = {
+            "app-current-abc123": "Host(`example.com`)",
+        }
+        stale = dokploy.find_stale_app_names(current_app_names, domains, traefik_files)
+        assert stale == set()
+
+    def test_multiple_domains(self):
+        """Detects stale configs across multiple domains."""
+        current_app_names = {"app-web-abc", "app-api-def"}
+        domains = {"web.example.com", "api.example.com"}
+        traefik_files = {
+            "app-web-abc": "Host(`web.example.com`)",
+            "app-api-def": "Host(`api.example.com`)",
+            "app-old-web-xyz": "Host(`web.example.com`)",
+            "app-old-api-uvw": "Host(`api.example.com`)",
+            "app-unrelated-zzz": "Host(`unrelated.com`)",
+        }
+        stale = dokploy.find_stale_app_names(current_app_names, domains, traefik_files)
+        assert stale == {"app-old-web-xyz", "app-old-api-uvw"}
+
+    def test_ignores_non_app_configs(self):
+        """Skips system configs like dokploy.yml and middlewares.yml."""
+        current_app_names = {"app-new-abc"}
+        domains = {"example.com"}
+        traefik_files = {
+            "app-new-abc": "Host(`example.com`)",
+            "dokploy": "Host(`dokploy.example.com`)",
+            "middlewares": "",
+        }
+        stale = dokploy.find_stale_app_names(current_app_names, domains, traefik_files)
+        assert stale == set()
+
+    def test_empty_domains_returns_empty(self):
+        """No cleanup needed when no domains are configured."""
+        stale = dokploy.find_stale_app_names({"app-abc"}, set(), {})
+        assert stale == set()
+
+    def test_collect_domains_from_config(self):
+        """Extracts domains from app definitions."""
+        cfg = {
+            "apps": [
+                {
+                    "name": "web",
+                    "domain": {"host": "web.example.com", "port": 80, "https": True, "certificateType": "letsencrypt"},
+                },
+                {
+                    "name": "api",
+                    "domain": [
+                        {"host": "api.example.com", "port": 80, "https": True, "certificateType": "letsencrypt"},
+                        {"host": "api2.example.com", "port": 80, "https": True, "certificateType": "letsencrypt"},
+                    ],
+                },
+                {"name": "worker"},
+            ],
+        }
+        domains = dokploy.collect_domains(cfg)
+        assert domains == {"web.example.com", "api.example.com", "api2.example.com"}
+
+    def test_cleanup_called_during_redeploy(self, tmp_path, monkeypatch):
+        """cmd_deploy calls cleanup_stale_routes when redeploying."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text("{}")
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
+
+        dokploy.cmd_deploy(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "cleanup" in calls
+
+    def test_cleanup_not_called_on_fresh_deploy(self, tmp_path, monkeypatch):
+        """cmd_deploy does not call cleanup_stale_routes on fresh deploy."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
+
+        dokploy.cmd_deploy(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "cleanup" not in calls
+
+    def test_cleanup_skipped_when_no_ssh_config(self, monkeypatch, capsys):
+        """cleanup_stale_routes skips gracefully when DOKPLOY_SSH_HOST is not set."""
+        monkeypatch.setattr(dokploy, "config", MagicMock(side_effect=lambda key, default="": default))
+
+        state = {"apps": {"web": {"appName": "app-web-abc"}}}
+        cfg = {
+            "apps": [
+                {"name": "web", "domain": {"host": "example.com", "port": 80, "https": True, "certificateType": "letsencrypt"}}
+            ]
+        }
+
+        dokploy.cleanup_stale_routes(state, cfg)
+
+        output = capsys.readouterr().out
+        assert "skipping" in output.lower() or output == ""
 
 
 class TestCmdSetupVolumes:
@@ -774,6 +955,99 @@ class TestCmdSetupVolumes:
 
         mount_calls = [call for call in client.post.call_args_list if call[0][0] == "mounts.create"]
         assert len(mount_calls) == 0
+
+
+class TestCmdSetupSavesStateOnFailure:
+    """cmd_setup saves state after project/app creation so destroy can clean up on later failures."""
+
+    def _mock_client_failing_on(self, fail_endpoint):
+        """Client that fails when a specific endpoint is called."""
+
+        def side_effect(endpoint, payload):
+            if endpoint == fail_endpoint:
+                raise Exception(f"Simulated failure on {endpoint}")
+            return {
+                "application.create": {"applicationId": "app-1", "appName": "app-abc"},
+                "project.create": {
+                    "project": {"projectId": "proj-1"},
+                    "environment": {"environmentId": "env-1"},
+                },
+            }.get(endpoint, {})
+
+        client = MagicMock()
+        client.post.side_effect = side_effect
+        client.get.return_value = []
+        return client
+
+    def test_state_saved_when_domain_creation_fails(self, tmp_path):
+        """State file exists after domain.create fails so destroy can clean up."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "domain": {"host": "example.com", "port": 80, "https": False, "certificateType": "none"},
+                }
+            ],
+        }
+        client = self._mock_client_failing_on("domain.create")
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+
+        with pytest.raises(Exception, match="Simulated failure"):
+            dokploy.cmd_setup(client, cfg, state_file)
+
+        assert state_file.exists()
+        state = json.loads(state_file.read_text())
+        assert state["projectId"] == "proj-1"
+        assert "app" in state["apps"]
+
+    def test_state_saved_when_mount_creation_fails(self, tmp_path):
+        """State file exists after mounts.create fails so destroy can clean up."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "volumes": [
+                        {"source": "data", "target": "/data", "type": "volume"},
+                    ],
+                }
+            ],
+        }
+        client = self._mock_client_failing_on("mounts.create")
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+
+        with pytest.raises(Exception, match="Simulated failure"):
+            dokploy.cmd_setup(client, cfg, state_file)
+
+        assert state_file.exists()
+        state = json.loads(state_file.read_text())
+        assert state["projectId"] == "proj-1"
+        assert "app" in state["apps"]
+
+    def test_no_state_saved_when_project_creation_fails(self, tmp_path):
+        """No state file when project.create itself fails — nothing to clean up."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                }
+            ],
+        }
+        client = self._mock_client_failing_on("project.create")
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+
+        with pytest.raises(Exception, match="Simulated failure"):
+            dokploy.cmd_setup(client, cfg, state_file)
+
+        assert not state_file.exists()
 
 
 def _state_with_app(app_name="web", app_id="app-123", dokploy_name="app-foo-bar-abc"):
@@ -948,3 +1222,341 @@ class TestResolveAppForExec:
         with pytest.raises(SystemExit):
             dokploy.resolve_app_for_exec(state, None)
         assert "specify an app" in capsys.readouterr().out
+
+
+class TestBuildSchedulePayload:
+    def test_minimal_schedule(self):
+        """Minimal schedule with only required fields."""
+        sched = {
+            "name": "daily-run",
+            "cronExpression": "0 9 * * *",
+            "command": "python run.py",
+        }
+        result = dokploy.build_schedule_payload("app-1", sched)
+        assert result == {
+            "name": "daily-run",
+            "cronExpression": "0 9 * * *",
+            "command": "python run.py",
+            "scheduleType": "application",
+            "applicationId": "app-1",
+            "shellType": "bash",
+            "enabled": True,
+        }
+
+    def test_all_optional_fields(self):
+        """Schedule with all optional fields specified."""
+        sched = {
+            "name": "weekday-run",
+            "cronExpression": "0 9 * * 1-5",
+            "command": "python run.py",
+            "shellType": "sh",
+            "timezone": "America/Chicago",
+            "enabled": False,
+        }
+        result = dokploy.build_schedule_payload("app-1", sched)
+        assert result["shellType"] == "sh"
+        assert result["timezone"] == "America/Chicago"
+        assert result["enabled"] is False
+
+    def test_defaults_shelltype_to_bash(self):
+        """shellType defaults to bash when not specified."""
+        sched = {
+            "name": "job",
+            "cronExpression": "* * * * *",
+            "command": "echo hi",
+        }
+        result = dokploy.build_schedule_payload("app-1", sched)
+        assert result["shellType"] == "bash"
+
+    def test_defaults_enabled_to_true(self):
+        """enabled defaults to True when not specified."""
+        sched = {
+            "name": "job",
+            "cronExpression": "* * * * *",
+            "command": "echo hi",
+        }
+        result = dokploy.build_schedule_payload("app-1", sched)
+        assert result["enabled"] is True
+
+    def test_timezone_omitted_when_not_specified(self):
+        """timezone key is absent from payload when not in schedule config."""
+        sched = {
+            "name": "job",
+            "cronExpression": "* * * * *",
+            "command": "echo hi",
+        }
+        result = dokploy.build_schedule_payload("app-1", sched)
+        assert "timezone" not in result
+
+
+class TestCmdSetupSchedules:
+    def _mock_client(self, app_id="app-1", app_name="app-abc123"):
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "application.create": {"applicationId": app_id, "appName": app_name},
+            "project.create": {
+                "project": {"projectId": "proj-1"},
+                "environment": {"environmentId": "env-1"},
+            },
+            "schedule.create": {"scheduleId": "sched-001"},
+        }.get(endpoint, {})
+        client.get.return_value = []
+        return client
+
+    def test_schedules_create_calls(self, tmp_path):
+        """cmd_setup calls schedule.create for each schedule."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "schedules": [
+                        {
+                            "name": "weekday-run",
+                            "cronExpression": "0 9 * * 1-5",
+                            "command": "python run.py",
+                            "shellType": "bash",
+                            "timezone": "America/Chicago",
+                        },
+                        {
+                            "name": "nightly",
+                            "cronExpression": "0 0 * * *",
+                            "command": "python cleanup.py",
+                        },
+                    ],
+                }
+            ],
+        }
+        client = self._mock_client()
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        dokploy.cmd_setup(client, cfg, state_file)
+
+        sched_calls = [call for call in client.post.call_args_list if call[0][0] == "schedule.create"]
+        assert len(sched_calls) == 2
+        assert sched_calls[0][0][1]["name"] == "weekday-run"
+        assert sched_calls[0][0][1]["cronExpression"] == "0 9 * * 1-5"
+        assert sched_calls[0][0][1]["timezone"] == "America/Chicago"
+        assert sched_calls[1][0][1]["name"] == "nightly"
+
+    def test_schedules_stored_in_state(self, tmp_path):
+        """cmd_setup stores scheduleIds in state."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "schedules": [
+                        {
+                            "name": "weekday-run",
+                            "cronExpression": "0 9 * * 1-5",
+                            "command": "python run.py",
+                        },
+                    ],
+                }
+            ],
+        }
+        client = self._mock_client()
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        dokploy.cmd_setup(client, cfg, state_file)
+
+        state = json.loads(state_file.read_text())
+        assert "schedules" in state["apps"]["app"]
+        assert "weekday-run" in state["apps"]["app"]["schedules"]
+        assert state["apps"]["app"]["schedules"]["weekday-run"]["scheduleId"] == "sched-001"
+
+    def test_no_schedules_skips(self, tmp_path):
+        """cmd_setup skips schedule creation when no schedules defined."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                }
+            ],
+        }
+        client = self._mock_client()
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        dokploy.cmd_setup(client, cfg, state_file)
+
+        sched_calls = [call for call in client.post.call_args_list if call[0][0] == "schedule.create"]
+        assert len(sched_calls) == 0
+
+    def test_state_saved_when_schedule_creation_fails(self, tmp_path):
+        """State file exists after schedule.create fails so destroy can clean up."""
+
+        def side_effect(endpoint, payload):
+            if endpoint == "schedule.create":
+                raise Exception("Simulated failure on schedule.create")
+            return {
+                "application.create": {"applicationId": "app-1", "appName": "app-abc"},
+                "project.create": {
+                    "project": {"projectId": "proj-1"},
+                    "environment": {"environmentId": "env-1"},
+                },
+            }.get(endpoint, {})
+
+        client = MagicMock()
+        client.post.side_effect = side_effect
+        client.get.return_value = []
+
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "schedules": [
+                        {
+                            "name": "job",
+                            "cronExpression": "* * * * *",
+                            "command": "echo hi",
+                        },
+                    ],
+                }
+            ],
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+
+        with pytest.raises(Exception, match="Simulated failure"):
+            dokploy.cmd_setup(client, cfg, state_file)
+
+        assert state_file.exists()
+        state = json.loads(state_file.read_text())
+        assert state["projectId"] == "proj-1"
+        assert "app" in state["apps"]
+
+
+class TestScheduleReconciliation:
+    def test_reconcile_creates_new_deletes_removed_updates_existing(self):
+        """reconcile_schedules creates new, updates existing, deletes removed."""
+        existing = [
+            {
+                "scheduleId": "s1",
+                "name": "keep-me",
+                "cronExpression": "0 0 * * *",
+                "command": "old cmd",
+                "shellType": "bash",
+                "enabled": True,
+            },
+            {
+                "scheduleId": "s2",
+                "name": "remove-me",
+                "cronExpression": "0 0 * * *",
+                "command": "bye",
+                "shellType": "bash",
+                "enabled": True,
+            },
+        ]
+        desired = [
+            {"name": "keep-me", "cronExpression": "0 9 * * *", "command": "new cmd"},
+            {"name": "add-me", "cronExpression": "0 12 * * *", "command": "hello"},
+        ]
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "schedule.create": {"scheduleId": "s3"},
+        }.get(endpoint, {})
+
+        result = dokploy.reconcile_schedules(client, "app-1", existing, desired)
+
+        # Check update call for "keep-me"
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.update"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["scheduleId"] == "s1"
+        assert update_calls[0][0][1]["cronExpression"] == "0 9 * * *"
+        assert update_calls[0][0][1]["command"] == "new cmd"
+
+        # Check delete call for "remove-me"
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.delete"]
+        assert len(delete_calls) == 1
+        assert delete_calls[0][0][1]["scheduleId"] == "s2"
+
+        # Check create call for "add-me"
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["name"] == "add-me"
+
+        # Check returned state
+        assert "keep-me" in result
+        assert result["keep-me"]["scheduleId"] == "s1"
+        assert "add-me" in result
+        assert result["add-me"]["scheduleId"] == "s3"
+        assert "remove-me" not in result
+
+    def test_reconcile_no_changes(self):
+        """reconcile_schedules does nothing when desired matches existing."""
+        existing = [
+            {
+                "scheduleId": "s1",
+                "name": "job",
+                "cronExpression": "0 0 * * *",
+                "command": "echo hi",
+                "shellType": "bash",
+                "enabled": True,
+            },
+        ]
+        desired = [
+            {"name": "job", "cronExpression": "0 0 * * *", "command": "echo hi"},
+        ]
+        client = MagicMock()
+        dokploy.reconcile_schedules(client, "app-1", existing, desired)
+
+        # No update needed since cron+command+defaults match
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.update"]
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.delete"]
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.create"]
+        assert len(update_calls) == 0
+        assert len(delete_calls) == 0
+        assert len(create_calls) == 0
+
+
+class TestScheduleSchemaValidation:
+    def test_schedules_config_valid(self, schedules_config):
+        dokploy.validate_config(schedules_config)
+
+    def test_schedules_parsed_correctly(self, schedules_config):
+        app = next(a for a in schedules_config["apps"] if a["name"] == "web")
+        assert len(app["schedules"]) == 2
+        assert app["schedules"][0]["name"] == "weekday-run"
+        assert app["schedules"][0]["cronExpression"] == "0 9 * * 1-5"
+        assert app["schedules"][0]["shellType"] == "bash"
+        assert app["schedules"][0]["timezone"] == "America/Chicago"
+        assert app["schedules"][1]["name"] == "nightly-cleanup"
+        assert app["schedules"][1]["cronExpression"] == "0 0 * * *"
+
+    def test_env_override_schedules(self):
+        """Environment overrides can override schedules per-app."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "schedules": [
+                        {"name": "job", "cronExpression": "0 0 * * *", "command": "echo base"},
+                    ],
+                }
+            ],
+            "environments": {
+                "prod": {
+                    "apps": {
+                        "web": {
+                            "schedules": [
+                                {"name": "job", "cronExpression": "0 9 * * 1-5", "command": "echo prod"},
+                            ],
+                        }
+                    }
+                }
+            },
+        }
+        merged = dokploy.merge_env_overrides(cfg, "prod")
+        web = next(a for a in merged["apps"] if a["name"] == "web")
+        assert web["schedules"][0]["cronExpression"] == "0 9 * * 1-5"
+        assert web["schedules"][0]["command"] == "echo prod"

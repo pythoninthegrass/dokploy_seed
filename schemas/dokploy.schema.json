@@ -181,6 +181,13 @@
                     "type": "string"
                   },
                   "description": "File paths to watch for auto-deploy triggers"
+                },
+                "schedules": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/schedule"
+                  },
+                  "description": "Cron jobs that run commands inside the app container"
                 }
               }
             }
@@ -309,6 +316,13 @@
               "$ref": "#/$defs/volume"
             },
             "description": "Persistent volume mounts for the application"
+          },
+          "schedules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/schedule"
+            },
+            "description": "Cron jobs that run commands inside the app container"
           }
         },
         "if": {
@@ -351,6 +365,47 @@
             "bind"
           ],
           "description": "Mount type: volume (Docker-managed) or bind (host path)"
+        }
+      }
+    },
+    "schedule": {
+      "type": "object",
+      "required": [
+        "name",
+        "cronExpression",
+        "command"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Schedule job name"
+        },
+        "cronExpression": {
+          "type": "string",
+          "description": "Standard 5-field cron expression (minute hour day month weekday)"
+        },
+        "command": {
+          "type": "string",
+          "description": "Command to run inside the app container"
+        },
+        "shellType": {
+          "type": "string",
+          "enum": [
+            "bash",
+            "sh"
+          ],
+          "default": "bash",
+          "description": "Shell to use for command execution (default: bash)"
+        },
+        "timezone": {
+          "type": "string",
+          "description": "IANA timezone (e.g. America/Chicago)"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the schedule is active (default: true)"
         }
       }
     },

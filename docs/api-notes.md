@@ -28,9 +28,19 @@ Requires the `x-api-key` header.
 
 - **`application.saveEnvironment`**: `createEnvFile` (boolean) became a required field in Dokploy v0.28.4 (added in v0.26.1 as optional, promoted to required later). Controls whether env vars are written to a `.env` file in the container's working directory. Set `false` to preserve pre-v0.26.1 behavior (env vars injected as process environment only).
 
-- **`mounts.create`**: Creates a persistent mount for an application. Required fields: `serviceId` (the application ID), `type` (`volume`, `bind`, or `file`), `mountPath` (container path). Optional: `serviceType` (`application` — the default for standalone apps). For `type: volume`, send `volumeName`; for `type: bind`, send `hostPath`.
+- **`mounts.create`**: Creates a persistent mount for an application. Required fields: `type` (`volume` or `bind`), `mountPath` (container path), `serviceId` (the application ID). Optional: `serviceType` (defaults to `application`). For `type: volume`, send `volumeName`; for `type: bind`, send `hostPath`. Note: the schema uses `additionalProperties: false` — do not send `applicationId`.
 
-- **`application.deploy`** returns an empty response body on success. Since v0.26.2, deployments execute asynchronously in the background — the endpoint returns immediately.
+- **`application.deploy`** triggers a fresh build and deploy. Returns an empty response body on success. Since v0.26.2, deployments execute asynchronously in the background — the endpoint returns immediately.
+
+- **`application.redeploy`**: Same as `application.deploy` but used for existing applications. Reuses the existing configuration and triggers a rebuild. Takes `{"applicationId": "..."}`. Used on the redeploy path when a state file already exists.
+
+- **`schedule.create`**: Creates a cron job attached to an application. Required fields: `name`, `cronExpression` (5-field cron), `command`. Also requires `scheduleType` (`application`) and `applicationId`. Optional: `shellType` (`bash` or `sh`, default `bash`), `timezone` (IANA string), `enabled` (boolean, default `true`). Returns the full schedule object including `scheduleId`.
+
+- **`schedule.list`**: GET with `?id=<applicationId>&scheduleType=application`. Returns an array of schedule objects for the given application.
+
+- **`schedule.update`**: Same fields as create but uses `scheduleId` instead of `applicationId`/`scheduleType`. Only changed fields need to be sent.
+
+- **`schedule.delete`**: POST with `{"scheduleId": "..."}`. Returns `true` on success.
 
 - **`project.create`** returns a nested structure: `{"project": {...}, "environment": {...}}`.
 

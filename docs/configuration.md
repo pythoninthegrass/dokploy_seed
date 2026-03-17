@@ -45,7 +45,7 @@ Per-environment overrides merged into the base config before any command runs.
 
 ### Overridable App Properties
 
-All per-app fields can be overridden per environment: `command`, `env`, `dockerImage`, `domain`, `buildType`, `dockerfile`, `dockerContextPath`, `dockerBuildStage`, `publishDirectory`, `autoDeploy`, `replicas`, `buildPath`, `triggerType`, `watchPaths`, `create_env_file`.
+All per-app fields can be overridden per environment: `command`, `env`, `dockerImage`, `domain`, `buildType`, `dockerfile`, `dockerContextPath`, `dockerBuildStage`, `publishDirectory`, `autoDeploy`, `replicas`, `buildPath`, `triggerType`, `watchPaths`, `create_env_file`, `schedules`.
 
 ### Merging Semantics
 
@@ -68,6 +68,7 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | `apps[].dockerContextPath` | no | Docker build context path (for `buildType: dockerfile`) |
 | `apps[].dockerBuildStage` | no | Docker build target stage (for `buildType: dockerfile`) |
 | `apps[].publishDirectory` | no | Publish directory (for `buildType: static`) |
+| `apps[].isStaticSpa` | no | Single Page Application mode (for `buildType: static`) |
 | `apps[].autoDeploy` | no | Enable auto-deploy on push (`true`/`false`) |
 | `apps[].replicas` | no | Number of app replicas (integer, minimum 1) |
 | `apps[].buildPath` | no | Build path for GitHub provider (default: `/`) |
@@ -75,6 +76,7 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | `apps[].watchPaths` | no | File paths to watch for auto-deploy triggers (list of strings) |
 | `apps[].create_env_file` | no | Write env vars to a `.env` file in the container working directory (default: `false`) |
 | `apps[].volumes` | no | List of volume mount objects for persistent storage |
+| `apps[].schedules` | no | List of cron job objects that run commands inside the app container |
 
 ### Volume Mount Object
 
@@ -83,6 +85,19 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | `volume.source` | yes | Volume name (for `type: volume`) or host path (for `type: bind`) |
 | `volume.target` | yes | Mount path inside the container |
 | `volume.type` | yes | `volume` (Docker-managed) or `bind` (host path) |
+
+### Schedule Object
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `schedule.name` | yes | Job name (used to match during reconciliation on redeploy) |
+| `schedule.cronExpression` | yes | Standard 5-field cron: `minute hour day month weekday` |
+| `schedule.command` | yes | Command to run inside the app container via `docker exec` |
+| `schedule.shellType` | no | `bash` (default) or `sh` |
+| `schedule.timezone` | no | IANA timezone (e.g. `America/Chicago`) |
+| `schedule.enabled` | no | Whether the schedule is active (default: `true`) |
+
+On first `setup`, schedules are created via the Dokploy `schedule.create` API. On subsequent `deploy` (redeploy), schedules are reconciled by name: existing schedules are updated, new ones are created, and removed ones are deleted.
 
 ### Domain Object
 
