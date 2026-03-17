@@ -1222,3 +1222,341 @@ class TestResolveAppForExec:
         with pytest.raises(SystemExit):
             dokploy.resolve_app_for_exec(state, None)
         assert "specify an app" in capsys.readouterr().out
+
+
+class TestBuildSchedulePayload:
+    def test_minimal_schedule(self):
+        """Minimal schedule with only required fields."""
+        sched = {
+            "name": "daily-run",
+            "cronExpression": "0 9 * * *",
+            "command": "python run.py",
+        }
+        result = dokploy.build_schedule_payload("app-1", sched)
+        assert result == {
+            "name": "daily-run",
+            "cronExpression": "0 9 * * *",
+            "command": "python run.py",
+            "scheduleType": "application",
+            "applicationId": "app-1",
+            "shellType": "bash",
+            "enabled": True,
+        }
+
+    def test_all_optional_fields(self):
+        """Schedule with all optional fields specified."""
+        sched = {
+            "name": "weekday-run",
+            "cronExpression": "0 9 * * 1-5",
+            "command": "python run.py",
+            "shellType": "sh",
+            "timezone": "America/Chicago",
+            "enabled": False,
+        }
+        result = dokploy.build_schedule_payload("app-1", sched)
+        assert result["shellType"] == "sh"
+        assert result["timezone"] == "America/Chicago"
+        assert result["enabled"] is False
+
+    def test_defaults_shelltype_to_bash(self):
+        """shellType defaults to bash when not specified."""
+        sched = {
+            "name": "job",
+            "cronExpression": "* * * * *",
+            "command": "echo hi",
+        }
+        result = dokploy.build_schedule_payload("app-1", sched)
+        assert result["shellType"] == "bash"
+
+    def test_defaults_enabled_to_true(self):
+        """enabled defaults to True when not specified."""
+        sched = {
+            "name": "job",
+            "cronExpression": "* * * * *",
+            "command": "echo hi",
+        }
+        result = dokploy.build_schedule_payload("app-1", sched)
+        assert result["enabled"] is True
+
+    def test_timezone_omitted_when_not_specified(self):
+        """timezone key is absent from payload when not in schedule config."""
+        sched = {
+            "name": "job",
+            "cronExpression": "* * * * *",
+            "command": "echo hi",
+        }
+        result = dokploy.build_schedule_payload("app-1", sched)
+        assert "timezone" not in result
+
+
+class TestCmdSetupSchedules:
+    def _mock_client(self, app_id="app-1", app_name="app-abc123"):
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "application.create": {"applicationId": app_id, "appName": app_name},
+            "project.create": {
+                "project": {"projectId": "proj-1"},
+                "environment": {"environmentId": "env-1"},
+            },
+            "schedule.create": {"scheduleId": "sched-001"},
+        }.get(endpoint, {})
+        client.get.return_value = []
+        return client
+
+    def test_schedules_create_calls(self, tmp_path):
+        """cmd_setup calls schedule.create for each schedule."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "schedules": [
+                        {
+                            "name": "weekday-run",
+                            "cronExpression": "0 9 * * 1-5",
+                            "command": "python run.py",
+                            "shellType": "bash",
+                            "timezone": "America/Chicago",
+                        },
+                        {
+                            "name": "nightly",
+                            "cronExpression": "0 0 * * *",
+                            "command": "python cleanup.py",
+                        },
+                    ],
+                }
+            ],
+        }
+        client = self._mock_client()
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        dokploy.cmd_setup(client, cfg, state_file)
+
+        sched_calls = [call for call in client.post.call_args_list if call[0][0] == "schedule.create"]
+        assert len(sched_calls) == 2
+        assert sched_calls[0][0][1]["name"] == "weekday-run"
+        assert sched_calls[0][0][1]["cronExpression"] == "0 9 * * 1-5"
+        assert sched_calls[0][0][1]["timezone"] == "America/Chicago"
+        assert sched_calls[1][0][1]["name"] == "nightly"
+
+    def test_schedules_stored_in_state(self, tmp_path):
+        """cmd_setup stores scheduleIds in state."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "schedules": [
+                        {
+                            "name": "weekday-run",
+                            "cronExpression": "0 9 * * 1-5",
+                            "command": "python run.py",
+                        },
+                    ],
+                }
+            ],
+        }
+        client = self._mock_client()
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        dokploy.cmd_setup(client, cfg, state_file)
+
+        state = json.loads(state_file.read_text())
+        assert "schedules" in state["apps"]["app"]
+        assert "weekday-run" in state["apps"]["app"]["schedules"]
+        assert state["apps"]["app"]["schedules"]["weekday-run"]["scheduleId"] == "sched-001"
+
+    def test_no_schedules_skips(self, tmp_path):
+        """cmd_setup skips schedule creation when no schedules defined."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                }
+            ],
+        }
+        client = self._mock_client()
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        dokploy.cmd_setup(client, cfg, state_file)
+
+        sched_calls = [call for call in client.post.call_args_list if call[0][0] == "schedule.create"]
+        assert len(sched_calls) == 0
+
+    def test_state_saved_when_schedule_creation_fails(self, tmp_path):
+        """State file exists after schedule.create fails so destroy can clean up."""
+
+        def side_effect(endpoint, payload):
+            if endpoint == "schedule.create":
+                raise Exception("Simulated failure on schedule.create")
+            return {
+                "application.create": {"applicationId": "app-1", "appName": "app-abc"},
+                "project.create": {
+                    "project": {"projectId": "proj-1"},
+                    "environment": {"environmentId": "env-1"},
+                },
+            }.get(endpoint, {})
+
+        client = MagicMock()
+        client.post.side_effect = side_effect
+        client.get.return_value = []
+
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "app",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "schedules": [
+                        {
+                            "name": "job",
+                            "cronExpression": "* * * * *",
+                            "command": "echo hi",
+                        },
+                    ],
+                }
+            ],
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+
+        with pytest.raises(Exception, match="Simulated failure"):
+            dokploy.cmd_setup(client, cfg, state_file)
+
+        assert state_file.exists()
+        state = json.loads(state_file.read_text())
+        assert state["projectId"] == "proj-1"
+        assert "app" in state["apps"]
+
+
+class TestScheduleReconciliation:
+    def test_reconcile_creates_new_deletes_removed_updates_existing(self):
+        """reconcile_schedules creates new, updates existing, deletes removed."""
+        existing = [
+            {
+                "scheduleId": "s1",
+                "name": "keep-me",
+                "cronExpression": "0 0 * * *",
+                "command": "old cmd",
+                "shellType": "bash",
+                "enabled": True,
+            },
+            {
+                "scheduleId": "s2",
+                "name": "remove-me",
+                "cronExpression": "0 0 * * *",
+                "command": "bye",
+                "shellType": "bash",
+                "enabled": True,
+            },
+        ]
+        desired = [
+            {"name": "keep-me", "cronExpression": "0 9 * * *", "command": "new cmd"},
+            {"name": "add-me", "cronExpression": "0 12 * * *", "command": "hello"},
+        ]
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "schedule.create": {"scheduleId": "s3"},
+        }.get(endpoint, {})
+
+        result = dokploy.reconcile_schedules(client, "app-1", existing, desired)
+
+        # Check update call for "keep-me"
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.update"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["scheduleId"] == "s1"
+        assert update_calls[0][0][1]["cronExpression"] == "0 9 * * *"
+        assert update_calls[0][0][1]["command"] == "new cmd"
+
+        # Check delete call for "remove-me"
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.delete"]
+        assert len(delete_calls) == 1
+        assert delete_calls[0][0][1]["scheduleId"] == "s2"
+
+        # Check create call for "add-me"
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["name"] == "add-me"
+
+        # Check returned state
+        assert "keep-me" in result
+        assert result["keep-me"]["scheduleId"] == "s1"
+        assert "add-me" in result
+        assert result["add-me"]["scheduleId"] == "s3"
+        assert "remove-me" not in result
+
+    def test_reconcile_no_changes(self):
+        """reconcile_schedules does nothing when desired matches existing."""
+        existing = [
+            {
+                "scheduleId": "s1",
+                "name": "job",
+                "cronExpression": "0 0 * * *",
+                "command": "echo hi",
+                "shellType": "bash",
+                "enabled": True,
+            },
+        ]
+        desired = [
+            {"name": "job", "cronExpression": "0 0 * * *", "command": "echo hi"},
+        ]
+        client = MagicMock()
+        dokploy.reconcile_schedules(client, "app-1", existing, desired)
+
+        # No update needed since cron+command+defaults match
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.update"]
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.delete"]
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "schedule.create"]
+        assert len(update_calls) == 0
+        assert len(delete_calls) == 0
+        assert len(create_calls) == 0
+
+
+class TestScheduleSchemaValidation:
+    def test_schedules_config_valid(self, schedules_config):
+        dokploy.validate_config(schedules_config)
+
+    def test_schedules_parsed_correctly(self, schedules_config):
+        app = next(a for a in schedules_config["apps"] if a["name"] == "web")
+        assert len(app["schedules"]) == 2
+        assert app["schedules"][0]["name"] == "weekday-run"
+        assert app["schedules"][0]["cronExpression"] == "0 9 * * 1-5"
+        assert app["schedules"][0]["shellType"] == "bash"
+        assert app["schedules"][0]["timezone"] == "America/Chicago"
+        assert app["schedules"][1]["name"] == "nightly-cleanup"
+        assert app["schedules"][1]["cronExpression"] == "0 0 * * *"
+
+    def test_env_override_schedules(self):
+        """Environment overrides can override schedules per-app."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "schedules": [
+                        {"name": "job", "cronExpression": "0 0 * * *", "command": "echo base"},
+                    ],
+                }
+            ],
+            "environments": {
+                "prod": {
+                    "apps": {
+                        "web": {
+                            "schedules": [
+                                {"name": "job", "cronExpression": "0 9 * * 1-5", "command": "echo prod"},
+                            ],
+                        }
+                    }
+                }
+            },
+        }
+        merged = dokploy.merge_env_overrides(cfg, "prod")
+        web = next(a for a in merged["apps"] if a["name"] == "web")
+        assert web["schedules"][0]["cronExpression"] == "0 9 * * 1-5"
+        assert web["schedules"][0]["command"] == "echo prod"

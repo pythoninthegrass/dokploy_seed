@@ -272,6 +272,94 @@ def build_mount_payload(app_id: str, mount: dict) -> dict:
     return payload
 
 
+def build_schedule_payload(app_id: str, sched: dict) -> dict:
+    """Build payload for schedule.create."""
+    payload = {
+        "name": sched["name"],
+        "cronExpression": sched["cronExpression"],
+        "command": sched["command"],
+        "scheduleType": "application",
+        "applicationId": app_id,
+        "shellType": sched.get("shellType", "bash"),
+        "enabled": sched.get("enabled", True),
+    }
+    if "timezone" in sched:
+        payload["timezone"] = sched["timezone"]
+    return payload
+
+
+def reconcile_schedules(
+    client: "DokployClient",
+    app_id: str,
+    existing: list[dict],
+    desired: list[dict],
+) -> dict:
+    """Reconcile schedules: update existing by name, create new, delete removed.
+
+    Returns a dict mapping schedule name -> {"scheduleId": ...} for state storage.
+    """
+    existing_by_name = {s["name"]: s for s in existing}
+    desired_by_name = {s["name"]: s for s in desired}
+
+    result_state = {}
+
+    for name, sched in desired_by_name.items():
+        payload = build_schedule_payload(app_id, sched)
+        if name in existing_by_name:
+            ex = existing_by_name[name]
+            schedule_id = ex["scheduleId"]
+            needs_update = (
+                payload.get("cronExpression") != ex.get("cronExpression")
+                or payload.get("command") != ex.get("command")
+                or payload.get("shellType") != ex.get("shellType")
+                or payload.get("enabled") != ex.get("enabled")
+                or payload.get("timezone") != ex.get("timezone")
+            )
+            if needs_update:
+                update_payload = {**payload, "scheduleId": schedule_id}
+                update_payload.pop("applicationId", None)
+                update_payload.pop("scheduleType", None)
+                client.post("schedule.update", update_payload)
+            result_state[name] = {"scheduleId": schedule_id}
+        else:
+            resp = client.post("schedule.create", payload)
+            result_state[name] = {"scheduleId": resp["scheduleId"]}
+
+    for name, ex in existing_by_name.items():
+        if name not in desired_by_name:
+            client.post("schedule.delete", {"scheduleId": ex["scheduleId"]})
+
+    return result_state
+
+
+def reconcile_app_schedules(
+    client: "DokployClient",
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+) -> None:
+    """Reconcile schedules for all apps on redeploy."""
+    changed = False
+    for app_def in cfg.get("apps", []):
+        schedules = app_def.get("schedules")
+        if schedules is None and "schedules" not in state["apps"].get(app_def["name"], {}):
+            continue
+        name = app_def["name"]
+        app_id = state["apps"][name]["applicationId"]
+        existing = client.get(
+            "schedule.list",
+            {"id": app_id, "scheduleType": "application"},
+        )
+        if not isinstance(existing, list):
+            existing = []
+        desired = schedules or []
+        new_state = reconcile_schedules(client, app_id, existing, desired)
+        state["apps"][name]["schedules"] = new_state
+        changed = True
+    if changed:
+        save_state(state, state_file)
+
+
 class DokployClient:
     """Thin httpx wrapper for Dokploy API."""
 
@@ -578,7 +666,21 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
             mount_payload = build_mount_payload(app_id, vol)
             client.post("mounts.create", mount_payload)
 
-    # 9. Save state
+    # 9. Schedules
+    for app_def in cfg["apps"]:
+        schedules = app_def.get("schedules")
+        if not schedules:
+            continue
+        name = app_def["name"]
+        app_id = state["apps"][name]["applicationId"]
+        state["apps"][name]["schedules"] = {}
+        for sched in schedules:
+            print(f"Creating schedule for {name}: {sched['name']}...")
+            sched_payload = build_schedule_payload(app_id, sched)
+            resp = client.post("schedule.create", sched_payload)
+            state["apps"][name]["schedules"][sched["name"]] = {"scheduleId": resp["scheduleId"]}
+
+    # 10. Save state
     save_state(state, state_file)
     print("\nSetup complete!")
     print(f"  Project: {project_id}")
@@ -683,6 +785,7 @@ def cmd_deploy(repo_root: Path, client: DokployClient, cfg: dict, state_file: Pa
 
     if is_redeploy:
         cleanup_stale_routes(load_state(state_file), cfg)
+        reconcile_app_schedules(client, cfg, load_state(state_file), state_file)
 
     print("\n==> Phase 4/4: trigger")
     cmd_trigger(client, cfg, state_file, redeploy=is_redeploy)

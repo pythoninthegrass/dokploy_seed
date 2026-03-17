@@ -75,6 +75,16 @@ apps:
     command: >-
       celery -A myproject worker
       --loglevel=INFO --concurrency=4
+    schedules:
+      - name: weekday-report
+        cronExpression: "0 9 * * 1-5"
+        command: "python manage.py send_report"
+        shellType: bash
+        timezone: America/Chicago
+      # - name: nightly-cleanup
+      #   cronExpression: "0 0 * * *"
+      #   command: "python manage.py cleanup"
+      #   enabled: false
 
   # Docker app with {ref} resolution — {redis} is replaced with the
   # Dokploy-assigned appName for the "redis" app at setup time

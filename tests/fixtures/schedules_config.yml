@@ -1,0 +1,19 @@
+project:
+  name: my-schedules-app
+  description: "App with scheduled cron jobs\n"
+  deploy_order:
+    - - web
+
+apps:
+  - name: web
+    source: docker
+    dockerImage: nginx:alpine
+    schedules:
+      - name: weekday-run
+        cronExpression: "0 9 * * 1-5"
+        command: "python run.py"
+        shellType: bash
+        timezone: America/Chicago
+      - name: nightly-cleanup
+        cronExpression: "0 0 * * *"
+        command: "python cleanup.py"
