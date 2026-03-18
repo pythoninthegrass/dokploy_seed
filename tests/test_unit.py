@@ -1560,3 +1560,88 @@ class TestScheduleSchemaValidation:
         web = next(a for a in merged["apps"] if a["name"] == "web")
         assert web["schedules"][0]["cronExpression"] == "0 9 * * 1-5"
         assert web["schedules"][0]["command"] == "echo prod"
+
+
+class TestCmdClean:
+    def test_cmd_clean_calls_cleanup_stale_routes(self, tmp_path, monkeypatch):
+        """cmd_clean delegates to cleanup_stale_routes with state and config."""
+        calls = []
+        state = {"projectId": "proj-1", "apps": {"web": {"appName": "app-web-abc"}}}
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps(state))
+
+        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda s, c: calls.append(("cleanup", s, c)))
+
+        cfg = {"apps": [{"name": "web"}]}
+        dokploy.cmd_clean(cfg, state_file)
+
+        assert len(calls) == 1
+        assert calls[0][0] == "cleanup"
+        assert calls[0][1]["apps"]["web"]["appName"] == "app-web-abc"
+        assert calls[0][2] is cfg
+
+
+class TestCmdDestroyCallsCleanup:
+    def test_destroy_calls_cleanup_before_delete(self, tmp_path, monkeypatch):
+        """cmd_destroy calls cleanup_stale_routes before deleting the project."""
+        order = []
+        state = {"projectId": "proj-1", "apps": {"web": {"appName": "app-web-abc"}}}
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps(state))
+
+        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda s, c: order.append("cleanup"))
+
+        client = MagicMock()
+        client.post = MagicMock(side_effect=lambda *a, **kw: order.append("project.remove"))
+
+        cfg = {"apps": [{"name": "web"}]}
+        dokploy.cmd_destroy(client, cfg, state_file)
+
+        assert order == ["cleanup", "project.remove"]
+        assert not state_file.exists()
+
+
+class TestCleanupSkipsWhenAllSshVarsMissing:
+    def test_skips_when_all_three_ssh_vars_empty(self, monkeypatch, capsys):
+        """cleanup_stale_routes skips when DOKPLOY_SSH_HOST, _USER, and _PORT are all empty."""
+        monkeypatch.setattr(dokploy, "config", MagicMock(side_effect=lambda key, default="": default))
+
+        state = {"apps": {"web": {"appName": "app-web-abc"}}}
+        cfg = {
+            "apps": [
+                {"name": "web", "domain": {"host": "example.com", "port": 80, "https": True, "certificateType": "letsencrypt"}}
+            ]
+        }
+
+        dokploy.cleanup_stale_routes(state, cfg)
+
+        output = capsys.readouterr().out
+        assert "skipping" in output.lower()
+
+    def test_proceeds_when_only_host_set(self, monkeypatch):
+        """cleanup_stale_routes proceeds (does not skip) when at least DOKPLOY_SSH_HOST is set."""
+
+        def fake_config(key, default=""):
+            if key == "DOKPLOY_SSH_HOST":
+                return "server.example.com"
+            return default
+
+        monkeypatch.setattr(dokploy, "config", MagicMock(side_effect=fake_config))
+
+        ssh_mock = MagicMock()
+        ssh_mock.exec_command.return_value = (None, MagicMock(read=lambda: b""), None)
+        ssh_class = MagicMock(return_value=ssh_mock)
+        monkeypatch.setattr(dokploy.paramiko, "SSHClient", ssh_class)
+
+        state = {"apps": {"web": {"appName": "app-web-abc"}}}
+        cfg = {
+            "apps": [
+                {"name": "web", "domain": {"host": "example.com", "port": 80, "https": True, "certificateType": "letsencrypt"}}
+            ]
+        }
+
+        dokploy.cleanup_stale_routes(state, cfg)
+
+        ssh_mock.connect.assert_called_once()

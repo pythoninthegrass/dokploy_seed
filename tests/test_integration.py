@@ -805,7 +805,7 @@ class TestCmdDestroy:
         remove_route = router.post(f"{BASE_URL}/api/project.remove").mock(return_value=httpx.Response(200, json={}))
         client = _make_client(router)
 
-        dokploy.cmd_destroy(client, state_file)
+        dokploy.cmd_destroy(client, {"apps": []}, state_file)
 
         # Verify project.remove was called with correct projectId
         payload = json.loads(remove_route.calls[0].request.content)
@@ -828,7 +828,7 @@ class TestCmdDestroy:
         remove_route = router.post(f"{BASE_URL}/api/project.remove").mock(return_value=httpx.Response(200, json={}))
         client = _make_client(router)
 
-        dokploy.cmd_destroy(client, state_file)
+        dokploy.cmd_destroy(client, {"apps": []}, state_file)
 
         assert remove_route.called
 
@@ -888,7 +888,7 @@ class TestFullPipeline:
         dokploy.cmd_status(client, state_file)
 
         # 5. Destroy — state file should be deleted
-        dokploy.cmd_destroy(client, state_file)
+        dokploy.cmd_destroy(client, web_app_config, state_file)
         assert not state_file.exists()
 
 

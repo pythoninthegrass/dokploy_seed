@@ -38,6 +38,7 @@ ic --env prod setup                      # Create project
 ic --env prod env                        # Push env vars
 ic --env prod deploy                     # Deploy apps
 ic --env prod status                     # Check status
+ic --env prod clean                      # Remove stale Traefik/Docker artifacts
 ic --env prod destroy                    # Tear down
 ic --env prod logs django                # Tail 100 lines of container logs
 ic --env prod logs django -f             # Follow log output
@@ -45,6 +46,12 @@ ic --env prod logs django -n 500         # Last 500 lines
 ic --env prod logs django --exited       # Pick from exited containers
 ic --env prod exec django                # Interactive shell (sh)
 ic --env prod exec django -- python manage.py shell  # Run command
+```
+
+### Reinstall after changes
+
+```bash
+uv tool install ~/git/icarus --force --reinstall
 ```
 
 ### Standalone (no install)
@@ -143,14 +150,14 @@ This project uses Backlog.md MCP for all task and project management.
 
 ### Key MCP Commands
 
-| Command | Purpose |
-|---------|---------|
-| `task_create` | Create a new task (status defaults to "To Do") |
-| `task_edit` | Edit metadata, check ACs, update notes, change status |
-| `task_view` | View full task details |
-| `task_search` | Find tasks by keyword |
-| `task_list` | List tasks with optional filters |
-| `task_complete` | **Moves task to `backlog/completed/`** — only use for cleanup, not for marking done |
+| Command         | Purpose                                                                          |
+|-----------------|----------------------------------------------------------------------------------|
+| `task_create`   | Create a new task (status defaults to "To Do")                                   |
+| `task_edit`     | Edit metadata, check ACs, update notes, change status                            |
+| `task_view`     | View full task details                                                           |
+| `task_search`   | Find tasks by keyword                                                            |
+| `task_list`     | List tasks with optional filters                                                 |
+| `task_complete` | **Moves task to `backlog/completed/`** — only use for cleanup, not marking done |
 
 ### Task Lifecycle
 

@@ -20,7 +20,7 @@ Dokploy deployment script — config-driven via dokploy.yml.
 
 Usage:
     ic check
-    ic --env <environment> <setup|env|deploy|status|destroy>
+    ic --env <environment> <setup|env|deploy|status|clean|destroy>
     ic --env <environment> logs [app] [-f] [-n TAIL] [--exited]
     ic --env <environment> exec [app] [--exited] [-- command...]
 
@@ -881,11 +881,16 @@ def _ssh_exec(ssh: paramiko.SSHClient, cmd: str) -> str:
 def cleanup_stale_routes(state: dict, cfg: dict) -> None:
     """Remove traefik configs and docker services for orphaned deployments.
 
-    Skips gracefully if DOKPLOY_SSH_HOST is not configured.
+    Skips gracefully if all three DOKPLOY_SSH_ env vars are missing.
     """
     host: str = config("DOKPLOY_SSH_HOST", default="")  # type: ignore[assignment]
+    user: str = config("DOKPLOY_SSH_USER", default="")  # type: ignore[assignment]
+    port: str = config("DOKPLOY_SSH_PORT", default="")  # type: ignore[assignment]
+    if not host and not user and not port:
+        print("  Cleanup: skipping (DOKPLOY_SSH_* env vars not set)")
+        return
     if not host:
-        print("  Cleanup: skipping (DOKPLOY_SSH_HOST not set)")
+        print("  Cleanup: skipping (DOKPLOY_SSH_HOST is required)")
         return
 
     domains = collect_domains(cfg)
@@ -893,13 +898,13 @@ def cleanup_stale_routes(state: dict, cfg: dict) -> None:
         return
 
     current_app_names = {info["appName"] for info in state["apps"].values()}
-    user: str = config("DOKPLOY_SSH_USER", default="root")  # type: ignore[assignment]
-    port: int = int(config("DOKPLOY_SSH_PORT", default="22"))  # type: ignore[assignment]
+    ssh_user = user or "root"
+    ssh_port = int(port) if port else 22
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
-        ssh.connect(host, port=port, username=user)
+        ssh.connect(host, port=ssh_port, username=ssh_user)
 
         traefik_files: dict[str, str] = {}
         file_list = _ssh_exec(ssh, f"ls {TRAEFIK_DYNAMIC_DIR}/*.yml 2>/dev/null")
@@ -1040,8 +1045,18 @@ def cmd_exec(client: DokployClient, state_file: Path, app: str | None, exited: b
         docker_client.close()
 
 
-def cmd_destroy(client: DokployClient, state_file: Path) -> None:
+def cmd_clean(cfg: dict, state_file: Path) -> None:
+    """Remove stale Traefik configs and orphaned Docker services."""
     state = load_state(state_file)
+    print("Cleaning stale routes...")
+    cleanup_stale_routes(state, cfg)
+    print("Clean complete.")
+
+
+def cmd_destroy(client: DokployClient, cfg: dict, state_file: Path) -> None:
+    state = load_state(state_file)
+
+    cleanup_stale_routes(state, cfg)
 
     project_id = state["projectId"]
     print(f"Deleting project {project_id} (cascades to all apps)...")
@@ -1125,6 +1140,7 @@ def main() -> None:
     sub.add_parser("deploy", help="Full pipeline: check, setup, env, trigger")
     sub.add_parser("trigger", help="Deploy apps in wave order")
     sub.add_parser("status", help="Show deployment status")
+    sub.add_parser("clean", help="Remove stale Traefik configs and orphaned Docker services")
     sub.add_parser("destroy", help="Delete project and state file")
     sub.add_parser("import", help="Import existing project from server")
 
@@ -1184,8 +1200,10 @@ def main() -> None:
             cmd_trigger(client, cfg, state_file, redeploy=True)
         case "status":
             cmd_status(client, state_file)
+        case "clean":
+            cmd_clean(cfg, state_file)
         case "destroy":
-            cmd_destroy(client, state_file)
+            cmd_destroy(client, cfg, state_file)
         case "import":
             cmd_import(client, cfg, state_file)
 

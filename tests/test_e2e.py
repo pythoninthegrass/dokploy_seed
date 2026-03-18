@@ -60,7 +60,7 @@ class TestE2ELifecycle:
             dokploy.cmd_status(e2e_client, state_file)
         finally:
             # destroy
-            dokploy.cmd_destroy(e2e_client, state_file)
+            dokploy.cmd_destroy(e2e_client, e2e_config, state_file)
 
         assert not state_file.exists()
 
@@ -71,7 +71,7 @@ class TestE2ELifecycle:
         state = json.loads(state_file.read_text())
         project_id = state["projectId"]
 
-        dokploy.cmd_destroy(e2e_client, state_file)
+        dokploy.cmd_destroy(e2e_client, e2e_config, state_file)
 
         projects = e2e_client.get("project.all")
         project_ids = [p["projectId"] for p in projects]

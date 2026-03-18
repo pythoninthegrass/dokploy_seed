@@ -155,4 +155,4 @@ def e2e_project(e2e_client, e2e_config, tmp_path):
         yield e2e_config, state_file, state
     finally:
         with contextlib.suppress(Exception):
-            _dokploy.cmd_destroy(e2e_client, state_file)
+            _dokploy.cmd_destroy(e2e_client, e2e_config, state_file)
