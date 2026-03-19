@@ -38,7 +38,7 @@ Configured in `pyproject.toml` under `[tool.pytest.ini_options]`:
 | `unit` | Pure function tests (no network, no state) |
 | `property` | Property-based tests (Hypothesis) |
 | `integration` | Tests that hit Dokploy APIs |
-| `e2e` | Full workflow tests (setup -> deploy -> destroy) |
+| `e2e` | Full workflow tests (setup -> apply -> destroy) |
 | `benchmark` | Performance benchmark tests |
 
 Run a single marker:

@@ -99,7 +99,7 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | `schedule.timezone` | no | IANA timezone (e.g. `America/Chicago`) |
 | `schedule.enabled` | no | Whether the schedule is active (default: `true`) |
 
-On first `setup`, schedules are created via the Dokploy `schedule.create` API. On subsequent `deploy` (redeploy), schedules are reconciled by name: existing schedules are updated, new ones are created, and removed ones are deleted.
+On first `setup`, schedules are created via the Dokploy `schedule.create` API. On subsequent `apply` (redeploy), schedules are reconciled by name: existing schedules are updated, new ones are created, and removed ones are deleted.
 
 ### Domain Object
 

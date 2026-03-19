@@ -20,7 +20,7 @@ Dokploy deployment script — config-driven via dokploy.yml.
 
 Usage:
     ic check
-    ic --env <environment> <setup|env|deploy|status|clean|destroy>
+    ic --env <environment> <setup|env|apply|status|clean|destroy>
     ic --env <environment> logs [app] [-f] [-n TAIL] [--exited]
     ic --env <environment> exec [app] [--exited] [-- command...]
 
@@ -866,7 +866,7 @@ def cmd_trigger(client: DokployClient, cfg: dict, state_file: Path, *, redeploy:
     print("\nAll deploys triggered.")
 
 
-def cmd_deploy(repo_root: Path, client: DokployClient, cfg: dict, state_file: Path) -> None:
+def cmd_apply(repo_root: Path, client: DokployClient, cfg: dict, state_file: Path) -> None:
     print("\n==> Phase 1/4: check")
     cmd_check(repo_root)
 
@@ -1246,7 +1246,7 @@ def main() -> None:
     sub.add_parser("check", help="Pre-flight checks")
     sub.add_parser("setup", help="Create project + apps")
     sub.add_parser("env", help="Push environment variables")
-    sub.add_parser("deploy", help="Full pipeline: check, setup, env, trigger")
+    sub.add_parser("apply", help="Full pipeline: check, setup, env, trigger")
     sub.add_parser("trigger", help="Deploy apps in wave order")
     sub.add_parser("status", help="Show deployment status")
     sub.add_parser("clean", help="Remove stale Traefik configs and orphaned Docker services")
@@ -1303,8 +1303,8 @@ def main() -> None:
             cmd_setup(client, cfg, state_file, repo_root)
         case "env":
             cmd_env(client, cfg, state_file, repo_root)
-        case "deploy":
-            cmd_deploy(repo_root, client, cfg, state_file)
+        case "apply":
+            cmd_apply(repo_root, client, cfg, state_file)
         case "trigger":
             cmd_trigger(client, cfg, state_file, redeploy=True)
         case "status":

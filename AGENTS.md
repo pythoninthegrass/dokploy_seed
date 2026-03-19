@@ -36,7 +36,7 @@ ic --help                                # Show usage
 ic check                                 # Pre-flight checks
 ic --env prod setup                      # Create project
 ic --env prod env                        # Push env vars
-ic --env prod deploy                     # Deploy apps
+ic --env prod apply                      # Full pipeline: check, setup, env, trigger
 ic --env prod status                     # Check status
 ic --env prod clean                      # Remove stale Traefik/Docker artifacts
 ic --env prod destroy                    # Tear down

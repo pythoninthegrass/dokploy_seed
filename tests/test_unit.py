@@ -225,12 +225,12 @@ class TestLoadSaveState:
 
 class TestArgparse:
     def test_valid_commands(self):
-        for cmd in ["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"]:
+        for cmd in ["check", "setup", "env", "apply", "trigger", "status", "destroy", "import"]:
             args = dokploy.argparse.ArgumentParser()
             args.add_argument("--env", default=None)
             args.add_argument(
                 "command",
-                choices=["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"],
+                choices=["check", "setup", "env", "apply", "trigger", "status", "destroy", "import"],
             )
             parsed = args.parse_args(["--env", "prod", cmd])
             assert parsed.command == cmd
@@ -241,7 +241,7 @@ class TestArgparse:
         parser.add_argument("--env", default=None)
         parser.add_argument(
             "command",
-            choices=["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"],
+            choices=["check", "setup", "env", "apply", "trigger", "status", "destroy", "import"],
         )
         with pytest.raises(SystemExit):
             parser.parse_args(["bogus"])
@@ -251,11 +251,11 @@ class TestArgparse:
         parser.add_argument("--env", default=None)
         parser.add_argument(
             "command",
-            choices=["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"],
+            choices=["check", "setup", "env", "apply", "trigger", "status", "destroy", "import"],
         )
-        parsed = parser.parse_args(["--env", "staging", "deploy"])
+        parsed = parser.parse_args(["--env", "staging", "apply"])
         assert parsed.env == "staging"
-        assert parsed.command == "deploy"
+        assert parsed.command == "apply"
 
 
 class TestGetStateFile:
@@ -582,28 +582,28 @@ class TestValidateConfigNewFixtures:
         assert app["volumes"][1]["type"] == "bind"
 
 
-class TestUnifiedDeploy:
+class TestUnifiedApply:
     def test_trigger_command_accepted(self):
         """'trigger' is a valid CLI choice."""
         parser = dokploy.argparse.ArgumentParser()
         parser.add_argument("--env", default=None)
         parser.add_argument(
             "command",
-            choices=["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"],
+            choices=["check", "setup", "env", "apply", "trigger", "status", "destroy", "import"],
         )
         parsed = parser.parse_args(["trigger"])
         assert parsed.command == "trigger"
 
-    def test_deploy_still_valid_command(self):
-        """'deploy' remains a valid CLI choice."""
+    def test_apply_still_valid_command(self):
+        """'apply' remains a valid CLI choice."""
         parser = dokploy.argparse.ArgumentParser()
         parser.add_argument("--env", default=None)
         parser.add_argument(
             "command",
-            choices=["check", "setup", "env", "deploy", "trigger", "status", "destroy", "import"],
+            choices=["check", "setup", "env", "apply", "trigger", "status", "destroy", "import"],
         )
-        parsed = parser.parse_args(["deploy"])
-        assert parsed.command == "deploy"
+        parsed = parser.parse_args(["apply"])
+        assert parsed.command == "apply"
 
     def test_cmd_trigger_exists(self):
         """dokploy.cmd_trigger is callable."""
@@ -619,7 +619,7 @@ class TestUnifiedDeploy:
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
 
-        dokploy.cmd_deploy(
+        dokploy.cmd_apply(
             repo_root=tmp_path,
             client="fake-client",
             cfg={"project": {}},
@@ -641,7 +641,7 @@ class TestUnifiedDeploy:
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
         monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
 
-        dokploy.cmd_deploy(
+        dokploy.cmd_apply(
             repo_root=tmp_path,
             client="fake-client",
             cfg={"project": {}},
@@ -666,7 +666,7 @@ class TestUnifiedDeploy:
         )
         monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
 
-        dokploy.cmd_deploy(
+        dokploy.cmd_apply(
             repo_root=tmp_path,
             client="fake-client",
             cfg={"project": {}},
@@ -687,7 +687,7 @@ class TestUnifiedDeploy:
             dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
         )
 
-        dokploy.cmd_deploy(
+        dokploy.cmd_apply(
             repo_root=tmp_path,
             client="fake-client",
             cfg={"project": {}},
@@ -705,7 +705,7 @@ class TestUnifiedDeploy:
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
 
-        dokploy.cmd_deploy(
+        dokploy.cmd_apply(
             repo_root=tmp_path,
             client="fake-client",
             cfg={"project": {}},
@@ -733,7 +733,7 @@ class TestUnifiedDeploy:
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
 
         with pytest.raises(SystemExit):
-            dokploy.cmd_deploy(
+            dokploy.cmd_apply(
                 repo_root=tmp_path,
                 client="fake-client",
                 cfg={"project": {}},
@@ -819,7 +819,7 @@ class TestCleanupStaleRoutes:
         assert domains == {"web.example.com", "api.example.com", "api2.example.com"}
 
     def test_cleanup_called_during_redeploy(self, tmp_path, monkeypatch):
-        """cmd_deploy calls cleanup_stale_routes when redeploying."""
+        """cmd_apply calls cleanup_stale_routes when redeploying."""
         calls = []
         state_file = tmp_path / ".dokploy-state" / "prod.json"
         state_file.parent.mkdir(parents=True)
@@ -831,7 +831,7 @@ class TestCleanupStaleRoutes:
         monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
         monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
 
-        dokploy.cmd_deploy(
+        dokploy.cmd_apply(
             repo_root=tmp_path,
             client="fake-client",
             cfg={"project": {}},
@@ -840,8 +840,8 @@ class TestCleanupStaleRoutes:
 
         assert "cleanup" in calls
 
-    def test_cleanup_not_called_on_fresh_deploy(self, tmp_path, monkeypatch):
-        """cmd_deploy does not call cleanup_stale_routes on fresh deploy."""
+    def test_cleanup_not_called_on_fresh_apply(self, tmp_path, monkeypatch):
+        """cmd_apply does not call cleanup_stale_routes on fresh apply."""
         calls = []
         state_file = tmp_path / ".dokploy-state" / "prod.json"
 
@@ -851,7 +851,7 @@ class TestCleanupStaleRoutes:
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
         monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
 
-        dokploy.cmd_deploy(
+        dokploy.cmd_apply(
             repo_root=tmp_path,
             client="fake-client",
             cfg={"project": {}},

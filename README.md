@@ -81,7 +81,7 @@ ic --help
     ```bash
     ic --env prod setup     # Create project + apps + providers + domains
     ic --env prod env       # Push filtered .env to env_targets + per-app env
-    ic --env prod deploy    # Deploy apps in wave order
+    ic --env prod apply     # Full pipeline: check, setup, env, trigger
     ic --env prod status    # Show status of all apps
     ic --env prod destroy   # Delete project + all apps
     ```
@@ -99,7 +99,7 @@ cd my-project
 |-----------|--------------------------------------------------------------------------------------------------|
 | `setup`   | Create Dokploy project, apps, configure providers (Docker/GitHub), set commands, create domains  |
 | `env`     | Push filtered `.env` to `env_targets` apps + per-app custom env vars                             |
-| `deploy`  | Trigger deploys in `deploy_order` wave sequence                                                  |
+| `apply`   | Full pipeline: check, setup, env, trigger deploys in `deploy_order` wave sequence                |
 | `status`  | Show application status for all apps in the project                                              |
 | `destroy` | Delete the Dokploy project (cascades to all apps) and remove state file                          |
 

@@ -839,8 +839,8 @@ class TestCmdDestroy:
 
 
 class TestFullPipeline:
-    def test_setup_env_deploy_status_destroy(self, tmp_path, web_app_config):
-        """Full lifecycle: setup -> env -> deploy -> status -> destroy."""
+    def test_setup_env_apply_status_destroy(self, tmp_path, web_app_config):
+        """Full lifecycle: setup -> env -> apply -> status -> destroy."""
         repo_root = tmp_path
 
         # Write .env file
@@ -849,7 +849,7 @@ class TestFullPipeline:
         router = respx.Router()
         ids = _setup_router(router, with_github=True, github_owner="your-org")
 
-        # Additional routes for env, deploy, status, destroy
+        # Additional routes for env, trigger, status, destroy
         router.post(f"{BASE_URL}/api/application.saveEnvironment").mock(return_value=httpx.Response(200, json={}))
         router.post(f"{BASE_URL}/api/application.deploy").mock(return_value=httpx.Response(200, content=b""))
 
@@ -972,13 +972,13 @@ class TestValidateState:
         assert dokploy.validate_state(client, state) is True
 
 
-class TestCmdDeployOrphanedState:
+class TestCmdApplyOrphanedState:
     def _write_state(self, state_file: Path, state: dict) -> None:
         state_file.parent.mkdir(parents=True, exist_ok=True)
         state_file.write_text(json.dumps(state))
 
     def test_orphaned_state_triggers_setup(self, tmp_path, minimal_config, monkeypatch, capsys):
-        """Deploy detects orphaned state, deletes it, and re-runs setup."""
+        """Apply detects orphaned state, deletes it, and re-runs setup."""
         stale_state = {
             "projectId": "proj-deleted",
             "environmentId": "env-deleted",
@@ -1026,7 +1026,7 @@ class TestCmdDeployOrphanedState:
             mock.post(f"{BASE_URL}/api/application.deploy").mock(return_value=httpx.Response(200, content=b""))
 
             client = dokploy.DokployClient(BASE_URL, API_KEY)
-            dokploy.cmd_deploy(tmp_path, client, minimal_config, state_file)
+            dokploy.cmd_apply(tmp_path, client, minimal_config, state_file)
 
         output = capsys.readouterr().out
         assert "orphaned" in output.lower() or "recreating" in output.lower()

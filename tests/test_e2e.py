@@ -40,7 +40,7 @@ class TestE2ELifecycle:
         assert app["dockerImage"] == "nginx:alpine"
 
     def test_full_lifecycle(self, e2e_client, e2e_config, tmp_path):
-        """Full lifecycle: setup -> env -> deploy -> status -> destroy."""
+        """Full lifecycle: setup -> env -> trigger -> status -> destroy."""
         state_file = tmp_path / ".dokploy-state" / "e2e.json"
 
         # setup
@@ -53,8 +53,8 @@ class TestE2ELifecycle:
             # env (no env_targets in config, so this is a no-op but should not error)
             dokploy.cmd_env(e2e_client, e2e_config, state_file, tmp_path)
 
-            # deploy
-            dokploy.cmd_deploy(e2e_client, e2e_config, state_file)
+            # trigger
+            dokploy.cmd_trigger(e2e_client, e2e_config, state_file)
 
             # status
             dokploy.cmd_status(e2e_client, state_file)

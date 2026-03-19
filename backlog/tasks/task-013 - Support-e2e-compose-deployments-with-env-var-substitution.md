@@ -47,7 +47,7 @@ A key part of this is env var substitution: compose files often hardcode credent
 - [x] #3 File reference compose: `composeFile` accepts a relative path (e.g. `compose.yml`, `docker-compose.yml`, `kestra/docker-compose.yml`) resolved relative to dokploy.yml location
 - [x] #4 ic setup creates compose resources via compose.create API for compose-type apps
 - [x] #5 ic env pushes env vars to compose resources via compose.update API (same filtering/prefix logic as application env)
-- [x] #6 ic deploy/trigger deploys compose resources via compose.deploy API, respecting deploy_order waves
+- [x] #6 ic apply/trigger deploys compose resources via compose.deploy API, respecting deploy_order waves
 - [x] #7 ic status reports compose deployment status (idle/running/done/error) and lists running services
 - [x] #8 ic destroy tears down compose resources via compose.delete API
 - [x] #9 Compose files support ${VAR} references resolved by Dokploy at deploy time from the compose resource env vars
@@ -83,7 +83,7 @@ ic currently only uses `application.create` — it has no code path for `compose
 Dokploy server is running v0.25.6 (schema pulled from live server, not available on GitHub). The compose API surface (`compose.create`, `compose.update`, `compose.deploy`, etc.) is identical between v0.25.6 and v0.28.8.
 
 **E2E deployment verified (2026-03-19):**
-- Kestra compose stack deployed via `ic --env prod deploy` from `examples/docker-compose/`
+- Kestra compose stack deployed via `ic --env prod apply` from `examples/docker-compose/`
 - `compose.create` with `sourceType: raw` via `compose.update`
 - Env vars pushed from `.env` via `env_targets` + `compose.update`
 - Compose file pushed on both initial setup and redeploy
