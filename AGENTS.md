@@ -100,6 +100,23 @@ If you skip this, `wt remove` deletes your CWD and **every subsequent Bash call 
 
 Shell integration (`wt` as a shell function) does NOT help here because each Bash tool call is an independent shell — the `cd` side-effect cannot persist.
 
+## OpenAPI Schema
+
+Fetch the Dokploy OpenAPI schema from the upstream GitHub repo using `scripts/fetch_openapi.sh`. Schemas are stored in `schemas/src/` and named by version (e.g. `openapi_0.28.8.json`).
+
+```bash
+./scripts/fetch_openapi.sh          # latest release
+./scripts/fetch_openapi.sh v0.28.8  # specific tag
+```
+
+For older Dokploy versions not available on GitHub (e.g. v0.25.6), pull the schema from the live server's OpenAPI endpoint:
+
+```bash
+curl -s -H "x-api-key: $(rg '^DOKPLOY_API_KEY=' .env | cut -d= -f2)" \
+  "$(rg '^DOKPLOY_URL=' .env | cut -d= -f2)/api/settings.getOpenApiDocument" \
+  | jq . > schemas/src/openapi_<version>.json
+```
+
 ## Ad-hoc API Calls
 
 Query the live Dokploy API from a local `.env` file:

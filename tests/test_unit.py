@@ -615,7 +615,7 @@ class TestUnifiedDeploy:
         state_file = tmp_path / ".dokploy-state" / "prod.json"
 
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: calls.append("check"))
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: calls.append("setup"))
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: calls.append("setup"))
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
 
@@ -636,7 +636,7 @@ class TestUnifiedDeploy:
         state_file.write_text("{}")
 
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: calls.append("check"))
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: calls.append("setup"))
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: calls.append("setup"))
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
         monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
@@ -659,7 +659,7 @@ class TestUnifiedDeploy:
         state_file.write_text("{}")
 
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: None)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
         monkeypatch.setattr(
             dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
@@ -681,7 +681,7 @@ class TestUnifiedDeploy:
         state_file = tmp_path / ".dokploy-state" / "prod.json"
 
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: None)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
         monkeypatch.setattr(
             dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
@@ -701,7 +701,7 @@ class TestUnifiedDeploy:
         state_file = tmp_path / ".dokploy-state" / "prod.json"
 
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: None)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
 
@@ -728,7 +728,7 @@ class TestUnifiedDeploy:
             raise SystemExit(1)
 
         monkeypatch.setattr(dokploy, "cmd_check", failing_check)
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: calls.append("setup"))
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: calls.append("setup"))
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
 
@@ -846,7 +846,7 @@ class TestCleanupStaleRoutes:
         state_file = tmp_path / ".dokploy-state" / "prod.json"
 
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf: None)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
         monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
         monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))

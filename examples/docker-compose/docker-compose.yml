@@ -53,7 +53,14 @@ services:
       - "8081"
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
+    networks:
+      - dokploy-network
+      - default
+
+networks:
+  dokploy-network:
+    external: true
 
 volumes:
   postgres-data:

@@ -230,15 +230,45 @@ def build_build_type_payload(app_id: str, app_def: dict) -> dict:
     return payload
 
 
-def build_domain_payload(app_id: str, dom: dict) -> dict:
+def is_compose(app_def: dict) -> bool:
+    """Check if an app definition uses compose source type."""
+    return app_def.get("source") == "compose"
+
+
+def resolve_compose_file(app_def: dict, repo_root: Path) -> str:
+    """Resolve compose file content from inline block scalar or relative path."""
+    compose_file = app_def["composeFile"]
+    # Multi-line string = inline block scalar
+    if "\n" in compose_file:
+        return compose_file
+    # Single-line = relative file path
+    path = repo_root / compose_file
+    if not path.exists():
+        print(f"ERROR: Compose file not found: {path}")
+        sys.exit(1)
+    return path.read_text()
+
+
+def build_domain_payload(resource_id: str, dom: dict, *, compose: bool = False) -> dict:
     """Build payload for domain.create."""
-    payload = {
-        "applicationId": app_id,
-        "host": dom["host"],
-        "port": dom["port"],
-        "https": dom["https"],
-        "certificateType": dom["certificateType"],
-    }
+    if compose:
+        payload = {
+            "composeId": resource_id,
+            "domainType": "compose",
+            "serviceName": dom["serviceName"],
+        }
+    else:
+        payload = {
+            "applicationId": resource_id,
+        }
+    payload.update(
+        {
+            "host": dom["host"],
+            "port": dom["port"],
+            "https": dom["https"],
+            "certificateType": dom["certificateType"],
+        }
+    )
     for key in ("path", "internalPath", "stripPath"):
         if key in dom:
             payload[key] = dom[key]
@@ -535,7 +565,7 @@ def cmd_check(repo_root: Path) -> None:
         sys.exit(1)
 
 
-def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
+def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path | None = None) -> None:
     if state_file.exists():
         print(f"ERROR: State file already exists: {state_file}")
         print("Run 'destroy' first or delete the state file manually.")
@@ -575,15 +605,35 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
     # 3. Create apps
     for app_def in cfg["apps"]:
         name = app_def["name"]
-        print(f"Creating app: {name}...")
-        result = client.post(
-            "application.create",
-            {"name": name, "environmentId": environment_id},
-        )
-        app_id = result["applicationId"]
-        app_name = result["appName"]
-        state["apps"][name] = {"applicationId": app_id, "appName": app_name}
-        print(f"  {name}: id={app_id} appName={app_name}")
+        if is_compose(app_def):
+            print(f"Creating compose: {name}...")
+            compose_type = app_def.get("composeType", "docker-compose")
+            result = client.post(
+                "compose.create",
+                {
+                    "name": name,
+                    "environmentId": environment_id,
+                    "composeType": compose_type,
+                },
+            )
+            compose_id = result["composeId"]
+            app_name = result["appName"]
+            state["apps"][name] = {
+                "composeId": compose_id,
+                "appName": app_name,
+                "source": "compose",
+            }
+            print(f"  {name}: id={compose_id} appName={app_name}")
+        else:
+            print(f"Creating app: {name}...")
+            result = client.post(
+                "application.create",
+                {"name": name, "environmentId": environment_id},
+            )
+            app_id = result["applicationId"]
+            app_name = result["appName"]
+            state["apps"][name] = {"applicationId": app_id, "appName": app_name}
+            print(f"  {name}: id={app_id} appName={app_name}")
 
     # Save state early so destroy can clean up if later steps fail
     save_state(state, state_file, quiet=True)
@@ -591,6 +641,17 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
     # 4. Configure providers
     for app_def in cfg["apps"]:
         name = app_def["name"]
+
+        if is_compose(app_def):
+            compose_id = state["apps"][name]["composeId"]
+            compose_content = resolve_compose_file(app_def, repo_root or state_file.parent.parent)
+            print(f"Pushing compose file for {name}...")
+            client.post(
+                "compose.update",
+                {"composeId": compose_id, "composeFile": compose_content, "sourceType": "raw"},
+            )
+            continue
+
         app_id = state["apps"][name]["applicationId"]
 
         if app_def["source"] == "docker":
@@ -619,6 +680,8 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
     # 5. Command overrides (resolve {ref} placeholders)
     for app_def in cfg["apps"]:
         name = app_def["name"]
+        if is_compose(app_def):
+            continue
         command = app_def.get("command")
         if not command:
             continue
@@ -639,14 +702,17 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
 
         # Support single dict or list of dicts
         domains = domain_cfg if isinstance(domain_cfg, list) else [domain_cfg]
-        app_id = state["apps"][name]["applicationId"]
+        compose = is_compose(app_def)
+        resource_id = state["apps"][name]["composeId"] if compose else state["apps"][name]["applicationId"]
         for dom in domains:
             print(f"Creating domain for {name}: {dom['host']}...")
-            domain_payload = build_domain_payload(app_id, dom)
+            domain_payload = build_domain_payload(resource_id, dom, compose=compose)
             client.post("domain.create", domain_payload)
 
     # 7. Application settings (autoDeploy, replicas)
     for app_def in cfg["apps"]:
+        if is_compose(app_def):
+            continue
         name = app_def["name"]
         app_id = state["apps"][name]["applicationId"]
         settings_payload = build_app_settings_payload(app_id, app_def)
@@ -656,6 +722,8 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
 
     # 8. Volume mounts
     for app_def in cfg["apps"]:
+        if is_compose(app_def):
+            continue
         volumes = app_def.get("volumes")
         if not volumes:
             continue
@@ -668,6 +736,8 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
 
     # 9. Schedules
     for app_def in cfg["apps"]:
+        if is_compose(app_def):
+            continue
         schedules = app_def.get("schedules")
         if not schedules:
             continue
@@ -685,7 +755,8 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path) -> None:
     print("\nSetup complete!")
     print(f"  Project: {project_id}")
     for name, info in state["apps"].items():
-        print(f"  {name}: {info['applicationId']}")
+        rid = info.get("composeId") or info.get("applicationId")
+        print(f"  {name}: {rid}")
 
 
 def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path) -> None:
@@ -707,19 +778,36 @@ def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path)
         print(f"Filtered .env: {total} vars (from {len(raw_env.splitlines())} lines)")
 
         for name in env_targets:
-            app_id = state["apps"][name]["applicationId"]
-            create_env_file = apps_by_name[name].get("create_env_file", False)
-            print(f"Pushing env vars to {name}...")
-            client.post(
-                "application.saveEnvironment",
-                {
-                    "applicationId": app_id,
-                    "env": resolve_refs(filtered, state),
-                    "buildArgs": None,
-                    "buildSecrets": None,
-                    "createEnvFile": create_env_file,
-                },
-            )
+            app_info = state["apps"][name]
+            resolved = resolve_refs(filtered, state)
+            if app_info.get("source") == "compose":
+                compose_id = app_info["composeId"]
+                app_def = apps_by_name[name]
+                compose_content = resolve_compose_file(app_def, repo_root)
+                print(f"Pushing env + compose file to {name}...")
+                client.post(
+                    "compose.update",
+                    {
+                        "composeId": compose_id,
+                        "env": resolved,
+                        "composeFile": compose_content,
+                        "sourceType": "raw",
+                    },
+                )
+            else:
+                app_id = app_info["applicationId"]
+                create_env_file = apps_by_name[name].get("create_env_file", False)
+                print(f"Pushing env vars to {name}...")
+                client.post(
+                    "application.saveEnvironment",
+                    {
+                        "applicationId": app_id,
+                        "env": resolved,
+                        "buildArgs": None,
+                        "buildSecrets": None,
+                        "createEnvFile": create_env_file,
+                    },
+                )
 
     # Push per-app custom env (with {ref} resolution)
     for app_def in cfg["apps"]:
@@ -728,19 +816,31 @@ def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path)
             continue
         name = app_def["name"]
         resolved = resolve_refs(custom_env, state)
-        app_id = state["apps"][name]["applicationId"]
-        create_env_file = app_def.get("create_env_file", False)
-        print(f"Pushing custom env to {name}...")
-        client.post(
-            "application.saveEnvironment",
-            {
-                "applicationId": app_id,
-                "env": resolved,
-                "buildArgs": None,
-                "buildSecrets": None,
-                "createEnvFile": create_env_file,
-            },
-        )
+        app_info = state["apps"][name]
+        if is_compose(app_def):
+            compose_id = app_info["composeId"]
+            print(f"Pushing custom env to compose {name}...")
+            existing = client.get("compose.one", {"composeId": compose_id})
+            prev_env = existing.get("env", "")
+            merged = (prev_env.rstrip("\n") + "\n" + resolved).lstrip("\n")
+            client.post(
+                "compose.update",
+                {"composeId": compose_id, "env": merged},
+            )
+        else:
+            app_id = app_info["applicationId"]
+            create_env_file = app_def.get("create_env_file", False)
+            print(f"Pushing custom env to {name}...")
+            client.post(
+                "application.saveEnvironment",
+                {
+                    "applicationId": app_id,
+                    "env": resolved,
+                    "buildArgs": None,
+                    "buildSecrets": None,
+                    "createEnvFile": create_env_file,
+                },
+            )
 
     print("\nEnvironment variables pushed.")
 
@@ -754,9 +854,13 @@ def cmd_trigger(client: DokployClient, cfg: dict, state_file: Path, *, redeploy:
     for i, wave in enumerate(deploy_order, 1):
         print(f"Wave {i}: {', '.join(wave)}")
         for name in wave:
-            app_id = state["apps"][name]["applicationId"]
+            app_info = state["apps"][name]
             print(f"  {action} {name}...")
-            client.post(endpoint, {"applicationId": app_id})
+            if app_info.get("source") == "compose":
+                compose_endpoint = "compose.redeploy" if redeploy else "compose.deploy"
+                client.post(compose_endpoint, {"composeId": app_info["composeId"]})
+            else:
+                client.post(endpoint, {"applicationId": app_info["applicationId"]})
             print(f"    {name} deploy triggered.")
 
     print("\nAll deploys triggered.")
@@ -775,10 +879,10 @@ def cmd_deploy(repo_root: Path, client: DokployClient, cfg: dict, state_file: Pa
         else:
             print("\n==> Phase 2/4: setup (state orphaned, recreating)")
             state_file.unlink()
-            cmd_setup(client, cfg, state_file)
+            cmd_setup(client, cfg, state_file, repo_root)
     else:
         print("\n==> Phase 2/4: setup")
-        cmd_setup(client, cfg, state_file)
+        cmd_setup(client, cfg, state_file, repo_root)
 
     print("\n==> Phase 3/4: env")
     cmd_env(client, cfg, state_file, repo_root)
@@ -797,8 +901,12 @@ def cmd_status(client: DokployClient, state_file: Path) -> None:
     print(f"Project: {state['projectId']}")
     print()
     for name, info in state["apps"].items():
-        app: dict = client.get("application.one", {"applicationId": info["applicationId"]})  # type: ignore[assignment]
-        status = app.get("applicationStatus", "unknown")
+        if info.get("source") == "compose":
+            comp: dict = client.get("compose.one", {"composeId": info["composeId"]})  # type: ignore[assignment]
+            status = comp.get("composeStatus", "unknown")
+        else:
+            app: dict = client.get("application.one", {"applicationId": info["applicationId"]})  # type: ignore[assignment]
+            status = app.get("applicationStatus", "unknown")
         print(f"  {name:10s}  {status}")
 
 
@@ -1122,7 +1230,8 @@ def cmd_import(client: DokployClient, cfg: dict, state_file: Path) -> None:
     print("\nImport complete!")
     print(f"  Project: {project_id}")
     for name, info in state["apps"].items():
-        print(f"  {name}: {info['applicationId']}")
+        rid = info.get("composeId") or info.get("applicationId")
+        print(f"  {name}: {rid}")
 
 
 def main() -> None:
@@ -1191,7 +1300,7 @@ def main() -> None:
 
     match args.command:
         case "setup":
-            cmd_setup(client, cfg, state_file)
+            cmd_setup(client, cfg, state_file, repo_root)
         case "env":
             cmd_env(client, cfg, state_file, repo_root)
         case "deploy":

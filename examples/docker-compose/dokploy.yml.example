@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pythoninthegrass/icarus/main/schemas/dokploy.schema.json
+
+project:
+  name: kestra
+  description: |
+    Kestra workflow orchestrator deployed via Dokploy
+
+  env_targets: [kestra]
+
+  deploy_order:
+    - [kestra]
+
+environments:
+  prod:
+    apps:
+      kestra:
+        domain:
+          host: kestra.nwcrane.com
+          port: 8080
+          https: true
+          certificateType: letsencrypt
+          serviceName: kestra
+
+apps:
+  - name: kestra
+    source: compose
+    composeFile: docker-compose.yml
+    composeType: docker-compose
+    # env: |
+    #   POSTGRES_DB=kestra
+    #   POSTGRES_USER=kestra
+    #   POSTGRES_PASSWORD=changeme
+    #   KESTRA_ADMIN_EMAIL=admin@localhost.dev
+    #   KESTRA_ADMIN_PASSWORD=changeme

@@ -58,7 +58,7 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | Key | Required | Description |
 |-----|----------|-------------|
 | `apps[].name` | yes | Unique app name within the project |
-| `apps[].source` | yes | `docker` or `github` |
+| `apps[].source` | yes | `docker`, `github`, or `compose` |
 | `apps[].dockerImage` | if docker | Docker image reference |
 | `apps[].command` | no | Command override, supports `{app_name}` refs |
 | `apps[].env` | no | Per-app env vars (not the project `.env`), supports `{app_name}` refs |
@@ -77,6 +77,8 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | `apps[].create_env_file` | no | Write env vars to a `.env` file in the container working directory (default: `false`) |
 | `apps[].volumes` | no | List of volume mount objects for persistent storage |
 | `apps[].schedules` | no | List of cron job objects that run commands inside the app container |
+| `apps[].composeFile` | if compose | Compose file — inline YAML block scalar (`\|`) or relative file path (e.g. `docker-compose.yml`) resolved from `dokploy.yml` location |
+| `apps[].composeType` | no | Compose type: `docker-compose` (default) or `stack` |
 
 ### Volume Mount Object
 
@@ -110,6 +112,50 @@ On first `setup`, schedules are created via the Dokploy `schedule.create` API. O
 | `domain.path` | no | URL path (default: `/`) |
 | `domain.internalPath` | no | Internal routing path (default: `/`) |
 | `domain.stripPath` | no | Strip path prefix before forwarding (default: `false`) |
+| `domain.serviceName` | if compose | Target service name within a compose stack for Traefik routing |
+
+## Compose Apps
+
+Apps with `source: compose` deploy a full Docker Compose stack as a single Dokploy resource. The compose file can be provided inline or as a relative file path:
+
+```yaml
+apps:
+  # Inline compose file
+  - name: my-stack
+    source: compose
+    composeFile: |
+      services:
+        web:
+          image: nginx
+          ports:
+            - "80"
+    composeType: docker-compose
+
+  # External compose file
+  - name: my-stack
+    source: compose
+    composeFile: docker-compose.yml
+    composeType: docker-compose
+```
+
+Compose env vars (defined in per-app `env:` or pushed from the project `.env` via `env_targets`) are available in the compose file using standard `${VAR}` syntax. Dokploy resolves these at deploy time. Use `$${VAR}` to escape literal `$` in shell contexts (e.g. healthcheck commands).
+
+Domains for compose apps require `serviceName` to identify which service in the stack receives traffic:
+
+```yaml
+environments:
+  prod:
+    apps:
+      my-stack:
+        domain:
+          host: app.example.com
+          port: 8080
+          https: true
+          certificateType: letsencrypt
+          serviceName: web
+```
+
+See `examples/docker-compose/` for a complete working example.
 
 ## `{app_name}` Resolution
 
@@ -144,3 +190,20 @@ The `# yaml-language-server` directive at the top of `dokploy.yml` enables IDE f
 ```
 
 This works in VS Code (with the YAML extension), JetBrains IDEs, and other editors that support the yaml-language-server protocol. You can also use a local relative path (`$schema=schemas/dokploy.schema.json`) if you have a copy of the schema in your repo.
+
+## Host Tuning
+
+Dokploy hosts running many containers (especially compose stacks) can exhaust default Linux inotify limits, causing `tail: inotify cannot be used, reverting to polling: Too many open files` during deployments.
+
+Apply these sysctl settings on the Dokploy host:
+
+```bash
+echo "fs.inotify.max_user_instances=512" | sudo tee -a /etc/sysctl.conf
+echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+```
+
+| Setting | Default | Recommended | Purpose |
+|---------|---------|-------------|---------|
+| `fs.inotify.max_user_instances` | 128 | 512 | Max inotify instances per user (each container watcher uses one) |
+| `fs.inotify.max_user_watches` | ~250,000 | 524,288 | Max files watched across all instances |
