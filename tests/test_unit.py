@@ -1645,3 +1645,531 @@ class TestCleanupSkipsWhenAllSshVarsMissing:
         dokploy.cleanup_stale_routes(state, cfg)
 
         ssh_mock.connect.assert_called_once()
+
+
+def _make_plan_state(app_defs, project_id="proj-123", environment_id="env-456"):
+    """Build a minimal state dict from app definitions for plan tests."""
+    state = {
+        "projectId": project_id,
+        "environmentId": environment_id,
+        "apps": {},
+    }
+    for app_def in app_defs:
+        name = app_def["name"]
+        if dokploy.is_compose(app_def):
+            state["apps"][name] = {
+                "composeId": f"compose-{name}-001",
+                "appName": f"{name}-abc123",
+                "source": "compose",
+            }
+        else:
+            state["apps"][name] = {
+                "applicationId": f"app-{name}-001",
+                "appName": f"{name}-abc123",
+            }
+    return state
+
+
+class TestComputePlanInitialSetup:
+    """When no state file exists, compute_plan shows all resources as creates."""
+
+    def test_shows_project_create(self, tmp_path, minimal_config):
+        cfg = dokploy.merge_env_overrides(minimal_config, "dev")
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        client = MagicMock()
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        project_changes = [c for c in changes if c["resource_type"] == "project"]
+        assert len(project_changes) == 1
+        assert project_changes[0]["action"] == "create"
+        assert project_changes[0]["attrs"]["name"] == "my-app"
+
+    def test_shows_app_creates(self, tmp_path, minimal_config):
+        cfg = dokploy.merge_env_overrides(minimal_config, "dev")
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        client = MagicMock()
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        app_changes = [c for c in changes if c["resource_type"] == "application"]
+        assert len(app_changes) == 1
+        assert app_changes[0]["action"] == "create"
+        assert app_changes[0]["name"] == "app"
+        assert app_changes[0]["attrs"]["source"] == "docker"
+        assert app_changes[0]["attrs"]["dockerImage"] == "nginx:alpine"
+
+    def test_shows_domain_creates(self, tmp_path, minimal_config):
+        cfg = dokploy.merge_env_overrides(minimal_config, "prod")
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        client = MagicMock()
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        domain_changes = [c for c in changes if c["resource_type"] == "domain"]
+        assert len(domain_changes) == 1
+        assert domain_changes[0]["action"] == "create"
+        assert domain_changes[0]["attrs"]["host"] == "app.example.com"
+
+    def test_shows_env_creates_for_env_targets(self, tmp_path, web_app_config):
+        cfg = dokploy.merge_env_overrides(web_app_config, "dev")
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        (tmp_path / ".env").write_text("APP_SECRET=hunter2\nDATABASE_URL=postgres://localhost/db\n")
+        client = MagicMock()
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        env_changes = [c for c in changes if c["resource_type"] == "environment"]
+        target_names = {c["name"] for c in env_changes}
+        assert "web" in target_names
+        assert "worker" in target_names
+
+    def test_shows_schedule_creates(self, tmp_path, schedules_config):
+        cfg = dokploy.merge_env_overrides(schedules_config, "dev")
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        client = MagicMock()
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        sched_changes = [c for c in changes if c["resource_type"] == "schedule"]
+        assert len(sched_changes) == 2
+        assert all(c["action"] == "create" for c in sched_changes)
+        names = {c["name"] for c in sched_changes}
+        assert names == {"weekday-run", "nightly-cleanup"}
+
+    def test_shows_volume_creates(self, tmp_path, volumes_config):
+        cfg = dokploy.merge_env_overrides(volumes_config, "dev")
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        client = MagicMock()
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        mount_changes = [c for c in changes if c["resource_type"] == "mount"]
+        assert len(mount_changes) > 0
+        assert all(c["action"] == "create" for c in mount_changes)
+
+    def test_no_api_calls_when_no_state(self, tmp_path, minimal_config):
+        cfg = dokploy.merge_env_overrides(minimal_config, "dev")
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        client = MagicMock()
+
+        dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        client.get.assert_not_called()
+        client.post.assert_not_called()
+
+
+class TestComputePlanNoChanges:
+    """When state exists and remote matches config, compute_plan returns empty."""
+
+    def test_env_up_to_date(self, tmp_path, minimal_config):
+        cfg = dokploy.merge_env_overrides(minimal_config, "dev")
+        state = _make_plan_state(cfg["apps"])
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps(state))
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "project.all":
+                return [{"projectId": "proj-123"}]
+            if endpoint == "application.one":
+                return {
+                    "applicationId": "app-app-001",
+                    "appName": "app-abc123",
+                    "env": None,
+                }
+            if endpoint == "schedule.list":
+                return []
+            return {}
+
+        client = MagicMock()
+        client.get.side_effect = mock_get
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        assert len(changes) == 0
+
+    def test_schedules_up_to_date(self, tmp_path, schedules_config):
+        cfg = dokploy.merge_env_overrides(schedules_config, "dev")
+        state = _make_plan_state(cfg["apps"])
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps(state))
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "project.all":
+                return [{"projectId": "proj-123"}]
+            if endpoint == "application.one":
+                return {
+                    "applicationId": params["applicationId"],
+                    "env": None,
+                }
+            if endpoint == "schedule.list":
+                return [
+                    {
+                        "scheduleId": "sched-1",
+                        "name": "weekday-run",
+                        "cronExpression": "0 9 * * 1-5",
+                        "command": "python run.py",
+                        "shellType": "bash",
+                        "enabled": True,
+                        "timezone": "America/Chicago",
+                    },
+                    {
+                        "scheduleId": "sched-2",
+                        "name": "nightly-cleanup",
+                        "cronExpression": "0 0 * * *",
+                        "command": "python cleanup.py",
+                        "shellType": "bash",
+                        "enabled": True,
+                        "timezone": None,
+                    },
+                ]
+            return {}
+
+        client = MagicMock()
+        client.get.side_effect = mock_get
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        assert len(changes) == 0
+
+
+class TestComputePlanEnvChanges:
+    """When env vars differ between local and remote, plan shows updates."""
+
+    def test_env_target_keys_changed(self, tmp_path, web_app_config):
+        cfg = dokploy.merge_env_overrides(web_app_config, "dev")
+        state = _make_plan_state(cfg["apps"])
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps(state))
+        (tmp_path / ".env").write_text("APP_SECRET=hunter2\nNEW_VAR=new\n")
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "project.all":
+                return [{"projectId": "proj-123"}]
+            if endpoint == "application.one":
+                return {
+                    "applicationId": params["applicationId"],
+                    "env": "APP_SECRET=oldvalue\nOLD_VAR=stale\n",
+                }
+            if endpoint == "compose.one":
+                return {"composeId": params["composeId"], "env": ""}
+            if endpoint == "schedule.list":
+                return []
+            return {}
+
+        client = MagicMock()
+        client.get.side_effect = mock_get
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        env_changes = [c for c in changes if c["resource_type"] == "environment"]
+        assert len(env_changes) > 0
+        assert all(c["action"] == "update" for c in env_changes)
+
+    def test_custom_env_changed(self, tmp_path, docker_only_config):
+        cfg = dokploy.merge_env_overrides(docker_only_config, "dev")
+        state = _make_plan_state(cfg["apps"])
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps(state))
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "project.all":
+                return [{"projectId": "proj-123"}]
+            if endpoint == "application.one":
+                app_id = params["applicationId"]
+                if "app" in app_id:
+                    return {
+                        "applicationId": app_id,
+                        "env": "DATABASE_URL=old\n",
+                    }
+                return {"applicationId": app_id, "env": None}
+            if endpoint == "schedule.list":
+                return []
+            return {}
+
+        client = MagicMock()
+        client.get.side_effect = mock_get
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        env_changes = [c for c in changes if c["resource_type"] == "environment"]
+        app_env = [c for c in env_changes if c["name"] == "app"]
+        assert len(app_env) == 1
+        assert app_env[0]["action"] == "update"
+        assert "added" in app_env[0]["attrs"]
+        assert "removed" in app_env[0]["attrs"]
+
+
+class TestComputePlanScheduleChanges:
+    """When schedules differ, plan shows creates/updates/deletes."""
+
+    def test_schedule_added(self, tmp_path, schedules_config):
+        cfg = dokploy.merge_env_overrides(schedules_config, "dev")
+        state = _make_plan_state(cfg["apps"])
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps(state))
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "project.all":
+                return [{"projectId": "proj-123"}]
+            if endpoint == "application.one":
+                return {
+                    "applicationId": params["applicationId"],
+                    "env": None,
+                }
+            if endpoint == "schedule.list":
+                return [
+                    {
+                        "scheduleId": "sched-1",
+                        "name": "weekday-run",
+                        "cronExpression": "0 9 * * 1-5",
+                        "command": "python run.py",
+                        "shellType": "bash",
+                        "enabled": True,
+                        "timezone": "America/Chicago",
+                    },
+                ]
+            return {}
+
+        client = MagicMock()
+        client.get.side_effect = mock_get
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        sched_creates = [c for c in changes if c["resource_type"] == "schedule" and c["action"] == "create"]
+        assert len(sched_creates) == 1
+        assert sched_creates[0]["name"] == "nightly-cleanup"
+
+    def test_schedule_updated(self, tmp_path, schedules_config):
+        cfg = dokploy.merge_env_overrides(schedules_config, "dev")
+        state = _make_plan_state(cfg["apps"])
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps(state))
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "project.all":
+                return [{"projectId": "proj-123"}]
+            if endpoint == "application.one":
+                return {
+                    "applicationId": params["applicationId"],
+                    "env": None,
+                }
+            if endpoint == "schedule.list":
+                return [
+                    {
+                        "scheduleId": "sched-1",
+                        "name": "weekday-run",
+                        "cronExpression": "0 0 * * *",
+                        "command": "python run.py",
+                        "shellType": "bash",
+                        "enabled": True,
+                        "timezone": "America/Chicago",
+                    },
+                    {
+                        "scheduleId": "sched-2",
+                        "name": "nightly-cleanup",
+                        "cronExpression": "0 0 * * *",
+                        "command": "python cleanup.py",
+                        "shellType": "bash",
+                        "enabled": True,
+                        "timezone": None,
+                    },
+                ]
+            return {}
+
+        client = MagicMock()
+        client.get.side_effect = mock_get
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        sched_updates = [c for c in changes if c["resource_type"] == "schedule" and c["action"] == "update"]
+        assert len(sched_updates) == 1
+        assert sched_updates[0]["name"] == "weekday-run"
+        assert sched_updates[0]["attrs"]["cronExpression"] == (
+            "0 0 * * *",
+            "0 9 * * 1-5",
+        )
+
+    def test_schedule_removed(self, tmp_path, schedules_config):
+        cfg = dokploy.merge_env_overrides(schedules_config, "dev")
+        state = _make_plan_state(cfg["apps"])
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps(state))
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "project.all":
+                return [{"projectId": "proj-123"}]
+            if endpoint == "application.one":
+                return {
+                    "applicationId": params["applicationId"],
+                    "env": None,
+                }
+            if endpoint == "schedule.list":
+                return [
+                    {
+                        "scheduleId": "sched-1",
+                        "name": "weekday-run",
+                        "cronExpression": "0 9 * * 1-5",
+                        "command": "python run.py",
+                        "shellType": "bash",
+                        "enabled": True,
+                        "timezone": "America/Chicago",
+                    },
+                    {
+                        "scheduleId": "sched-2",
+                        "name": "nightly-cleanup",
+                        "cronExpression": "0 0 * * *",
+                        "command": "python cleanup.py",
+                        "shellType": "bash",
+                        "enabled": True,
+                        "timezone": None,
+                    },
+                    {
+                        "scheduleId": "sched-3",
+                        "name": "old-job",
+                        "cronExpression": "0 0 * * *",
+                        "command": "echo stale",
+                        "shellType": "bash",
+                        "enabled": True,
+                        "timezone": None,
+                    },
+                ]
+            return {}
+
+        client = MagicMock()
+        client.get.side_effect = mock_get
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        sched_deletes = [c for c in changes if c["resource_type"] == "schedule" and c["action"] == "destroy"]
+        assert len(sched_deletes) == 1
+        assert sched_deletes[0]["name"] == "old-job"
+
+
+class TestPrintPlan:
+    """Test the formatted output of print_plan."""
+
+    def test_no_changes_message(self, capsys):
+        dokploy.print_plan([])
+        captured = capsys.readouterr()
+        assert "up to date" in captured.out.lower()
+
+    def test_summary_line(self, capsys):
+        changes = [
+            {
+                "action": "create",
+                "resource_type": "project",
+                "name": "my-app",
+                "parent": None,
+                "attrs": {"name": "my-app"},
+            },
+            {
+                "action": "create",
+                "resource_type": "application",
+                "name": "web",
+                "parent": None,
+                "attrs": {"source": "docker"},
+            },
+            {
+                "action": "update",
+                "resource_type": "environment",
+                "name": "web",
+                "parent": None,
+                "attrs": {"added": ["NEW"], "removed": ["OLD"]},
+            },
+            {
+                "action": "destroy",
+                "resource_type": "schedule",
+                "name": "old-job",
+                "parent": "web",
+                "attrs": {"command": "echo old"},
+            },
+        ]
+        dokploy.print_plan(changes)
+        captured = capsys.readouterr()
+        assert "2 to create" in captured.out
+        assert "1 to update" in captured.out
+        assert "1 to destroy" in captured.out
+
+    def test_create_uses_plus_symbol(self, capsys):
+        changes = [
+            {
+                "action": "create",
+                "resource_type": "application",
+                "name": "web",
+                "parent": None,
+                "attrs": {"source": "docker"},
+            },
+        ]
+        dokploy.print_plan(changes)
+        captured = capsys.readouterr()
+        assert "+ " in captured.out
+
+    def test_update_uses_tilde_symbol(self, capsys):
+        changes = [
+            {
+                "action": "update",
+                "resource_type": "environment",
+                "name": "web",
+                "parent": None,
+                "attrs": {"added": ["NEW"], "removed": []},
+            },
+        ]
+        dokploy.print_plan(changes)
+        captured = capsys.readouterr()
+        assert "~ " in captured.out
+
+    def test_destroy_uses_minus_symbol(self, capsys):
+        changes = [
+            {
+                "action": "destroy",
+                "resource_type": "schedule",
+                "name": "old-job",
+                "parent": "web",
+                "attrs": {"command": "echo old"},
+            },
+        ]
+        dokploy.print_plan(changes)
+        captured = capsys.readouterr()
+        assert "- " in captured.out
+
+
+class TestComputePlanOrphanedState:
+    """When state exists but project is gone, plan shows full creates."""
+
+    def test_orphaned_state_shows_creates(self, tmp_path, minimal_config):
+        cfg = dokploy.merge_env_overrides(minimal_config, "dev")
+        state = _make_plan_state(cfg["apps"])
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps(state))
+
+        client = MagicMock()
+        client.get.side_effect = lambda endpoint, params=None: ([] if endpoint == "project.all" else {})
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        project_changes = [c for c in changes if c["resource_type"] == "project"]
+        assert len(project_changes) == 1
+        assert project_changes[0]["action"] == "create"
+
+
+class TestCmdPlan:
+    """Test cmd_plan calls compute_plan and print_plan."""
+
+    def test_cmd_plan_runs(self, tmp_path, minimal_config, capsys):
+        cfg = dokploy.merge_env_overrides(minimal_config, "dev")
+        state_file = tmp_path / ".dokploy-state" / "dev.json"
+        client = MagicMock()
+
+        dokploy.cmd_plan(client, cfg, state_file, tmp_path)
+
+        captured = capsys.readouterr()
+        assert "create" in captured.out.lower()

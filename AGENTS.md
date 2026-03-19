@@ -36,6 +36,7 @@ ic --help                                # Show usage
 ic check                                 # Pre-flight checks
 ic --env prod setup                      # Create project
 ic --env prod env                        # Push env vars
+ic --env prod plan                       # Preview what apply would change (dry run)
 ic --env prod apply                      # Full pipeline: check, setup, env, trigger
 ic --env prod status                     # Check status
 ic --env prod clean                      # Remove stale Traefik/Docker artifacts
@@ -87,6 +88,7 @@ See [docs/testing.md](docs/testing.md) for fixture architecture, markers, covera
 - If test data changes: update YAML files in `tests/fixtures/`, not inline dicts
 - Example configs in `examples/` should validate against the schema
 - NEVER add section comments (e.g. `# --- Section Name ---`, `# == Foo ==`) to any code; use class/function structure and docstrings for organization
+- NEVER create new test files; add tests to the existing files in `tests/` (e.g. `test_unit.py`, `test_integration.py`, `test_e2e.py`, `test_property.py`)
 
 ## Worktrunk (worktree cleanup)
 
