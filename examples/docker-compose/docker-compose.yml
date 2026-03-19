@@ -33,7 +33,6 @@ services:
         kestra:
           server:
             basicAuth:
-              enabled: false
               username: ${KESTRA_ADMIN_EMAIL}
               password: ${KESTRA_ADMIN_PASSWORD}
           repository:
