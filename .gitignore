@@ -1,5 +1,5 @@
 # ! .dokploy-state/ is intentionally committed (contains only resource IDs, no secrets) in repos with business logic, just not the cli tool repo
-.dokploy-state/*
+**/.dokploy-state/*
 **/dokploy.yml
 
 # ETC
