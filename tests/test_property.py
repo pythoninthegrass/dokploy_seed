@@ -40,12 +40,17 @@ class TestFilterEnvProperties:
 
     @given(content=env_content(), prefixes=exclude_prefixes())
     def test_no_excluded_keys_survive(self, content, prefixes):
-        """Output never contains a line starting with any excluded prefix."""
+        """Output never contains a key matching any exclusion pattern."""
         result = dokploy.filter_env(content, prefixes)
         for line in result.splitlines():
             key = line.split("=", 1)[0].strip()
-            for prefix in prefixes:
-                assert not key.startswith(prefix), f"Excluded prefix {prefix!r} found in output key {key!r}"
+            for pattern in prefixes:
+                if pattern.endswith("*"):
+                    assert not key.startswith(pattern[:-1]), f"Wildcard pattern {pattern!r} should have excluded key {key!r}"
+                elif pattern.endswith("_"):
+                    assert not key.startswith(pattern), f"Prefix pattern {pattern!r} should have excluded key {key!r}"
+                else:
+                    assert key != pattern, f"Exact pattern {pattern!r} should have excluded key {key!r}"
 
     @given(content=env_content(), prefixes=exclude_prefixes())
     def test_no_comments_or_blanks(self, content, prefixes):

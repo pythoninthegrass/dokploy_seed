@@ -150,25 +150,35 @@ class TestResolveRefs:
         assert result == "plain string"
 
 
-class TestGetEnvExcludePrefixes:
+class TestGetEnvExcludes:
     def test_defaults_only(self, monkeypatch):
         monkeypatch.delenv("ENV_EXCLUDE_PREFIXES", raising=False)
-        prefixes = dokploy.get_env_exclude_prefixes()
-        assert "COMPOSE_" in prefixes
-        assert "DOKPLOY_" in prefixes
+        monkeypatch.delenv("ENV_EXCLUDES", raising=False)
+        patterns = dokploy.get_env_excludes()
+        assert "COMPOSE_" in patterns
+        assert "DOKPLOY_" in patterns
 
-    def test_with_extras(self, monkeypatch):
+    def test_with_legacy_env_var(self, monkeypatch):
+        monkeypatch.delenv("ENV_EXCLUDES", raising=False)
         monkeypatch.setenv("ENV_EXCLUDE_PREFIXES", "MY_SECRET_,INTERNAL_")
-        prefixes = dokploy.get_env_exclude_prefixes()
-        assert "MY_SECRET_" in prefixes
-        assert "INTERNAL_" in prefixes
-        # Defaults still present
-        assert "COMPOSE_" in prefixes
+        patterns = dokploy.get_env_excludes()
+        assert "MY_SECRET_" in patterns
+        assert "INTERNAL_" in patterns
+        assert "COMPOSE_" in patterns
+
+    def test_with_new_env_var(self, monkeypatch):
+        monkeypatch.delenv("ENV_EXCLUDE_PREFIXES", raising=False)
+        monkeypatch.setenv("ENV_EXCLUDES", "DEV,SECRET*")
+        patterns = dokploy.get_env_excludes()
+        assert "DEV" in patterns
+        assert "SECRET*" in patterns
+        assert "COMPOSE_" in patterns
 
     def test_empty_extras(self, monkeypatch):
         monkeypatch.setenv("ENV_EXCLUDE_PREFIXES", "")
-        prefixes = dokploy.get_env_exclude_prefixes()
-        assert prefixes == dokploy.DEFAULT_ENV_EXCLUDE_PREFIXES
+        monkeypatch.setenv("ENV_EXCLUDES", "")
+        patterns = dokploy.get_env_excludes()
+        assert patterns == dokploy.DEFAULT_ENV_EXCLUDES
 
 
 class TestFilterEnv:
@@ -203,6 +213,46 @@ class TestFilterEnv:
         content = "# just a comment\n"
         result = dokploy.filter_env(content, [])
         assert result == ""
+
+    def test_exact_match_excludes_only_exact_key(self):
+        content = "DEV=True\nDEVICE_TOKEN=abc\nDEVELOPER_MODE=on\n"
+        result = dokploy.filter_env(content, ["DEV"])
+        assert "DEV=True" not in result
+        assert "DEVICE_TOKEN=abc" in result
+        assert "DEVELOPER_MODE=on" in result
+
+    def test_prefix_match_with_trailing_underscore(self):
+        content = "COMPOSE_FILE=x\nCOMPOSE_PROJECT=y\nCOMPOSER=z\n"
+        result = dokploy.filter_env(content, ["COMPOSE_"])
+        assert "COMPOSE_FILE" not in result
+        assert "COMPOSE_PROJECT" not in result
+        assert "COMPOSER=z" in result
+
+    def test_prefix_match_with_trailing_wildcard(self):
+        content = "SECRET_KEY=abc\nSECRET_TOKEN=xyz\nSECURE=yes\n"
+        result = dokploy.filter_env(content, ["SECRET*"])
+        assert "SECRET_KEY" not in result
+        assert "SECRET_TOKEN" not in result
+        assert "SECURE=yes" in result
+
+    def test_mixed_exact_and_prefix_patterns(self):
+        content = "DEV=True\nDEVICE=phone\nCOMPOSE_FILE=x\nDEBUG=1\n"
+        result = dokploy.filter_env(content, ["DEV", "COMPOSE_", "DEBUG"])
+        assert "DEV=True" not in result
+        assert "DEVICE=phone" in result
+        assert "COMPOSE_FILE" not in result
+        assert "DEBUG=1" not in result
+
+    def test_empty_pattern_list(self):
+        content = "A=1\nB=2\n"
+        result = dokploy.filter_env(content, [])
+        assert result == "A=1\nB=2\n"
+
+    def test_exact_match_case_sensitive(self):
+        content = "dev=true\nDEV=True\n"
+        result = dokploy.filter_env(content, ["DEV"])
+        assert "DEV=True" not in result
+        assert "dev=true" in result
 
 
 class TestLoadSaveState:

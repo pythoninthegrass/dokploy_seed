@@ -37,15 +37,21 @@ def env_content(draw):
 
 @st.composite
 def exclude_prefixes(draw):
-    """Generate a list of uppercase prefixes to exclude."""
-    prefixes = draw(
+    """Generate a list of exclusion patterns (exact matches and prefix patterns).
+
+    Patterns ending with ``_`` or ``*`` are prefix matches; others are exact.
+    """
+    exact = st.from_regex(r"[A-Z][A-Z0-9]{0,8}", fullmatch=True)
+    prefix_underscore = st.from_regex(r"[A-Z][A-Z0-9]{0,7}_", fullmatch=True)
+    prefix_wildcard = st.builds(lambda s: s + "*", st.from_regex(r"[A-Z][A-Z0-9]{0,7}", fullmatch=True))
+    patterns = draw(
         st.lists(
-            st.from_regex(r"[A-Z][A-Z0-9_]{0,8}", fullmatch=True),
+            st.one_of(exact, prefix_underscore, prefix_wildcard),
             min_size=0,
             max_size=5,
         )
     )
-    return prefixes
+    return patterns
 
 
 @st.composite

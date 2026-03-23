@@ -153,7 +153,7 @@ HYPOTHESIS_PROFILE=dev uv run pytest tests/ -m property
 | `app_name` | Lowercase names with hyphens (`[a-z][a-z0-9-]{0,15}`) |
 | `ref_compatible_name` | `\w`-only names for `resolve_refs` tests (no hyphens) |
 | `env_content()` | Realistic `.env` file content (KEY=value, comments, blanks) |
-| `exclude_prefixes()` | Lists of uppercase prefixes |
+| `exclude_prefixes()` | Lists of exclusion patterns (exact, prefix with `_`, wildcard with `*`) |
 | `state_dict()` | State dict with apps mapping; `ref_safe=True` for resolve_refs |
 | `app_config()` | Valid app config dict |
 | `dokploy_config()` | Full valid config matching the JSON schema |

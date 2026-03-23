@@ -172,7 +172,8 @@ Resolution happens during `setup` (for commands) and `env` (for environment vari
 | `DOKPLOY_URL` | yes | — | Dokploy server URL |
 | `DOKPLOY_API_KEY` | yes | — | API key for authentication |
 | `DOKPLOY_ENV` | no | `dev` | Target environment (alternative to `--env` flag) |
-| `ENV_EXCLUDE_PREFIXES` | no | — | Extra env var prefixes to exclude when pushing `.env` |
+| `ENV_EXCLUDES` | no | — | Extra env var exclusion patterns when pushing `.env` (see below) |
+| `ENV_EXCLUDE_PREFIXES` | no | — | Legacy alias for `ENV_EXCLUDES` |
 | `DOKPLOY_SSH_HOST` | for logs/exec | — | SSH host for Docker access (IP or hostname) |
 | `DOKPLOY_SSH_USER` | no | `root` | SSH user for Docker access |
 | `DOKPLOY_SSH_PORT` | no | `22` | SSH port for Docker access |
@@ -180,6 +181,24 @@ Resolution happens during `setup` (for commands) and `env` (for environment vari
 Resolution order: `--env` flag > `DOKPLOY_ENV` (from `.env` or environment) > `dev`.
 
 The `DOKPLOY_SSH_*` variables are only required for the `logs` and `exec` commands, which connect to the Docker daemon on the Dokploy host via SSH.
+
+### Env Exclusion Patterns
+
+`ENV_EXCLUDES` (and the legacy `ENV_EXCLUDE_PREFIXES`) accepts a comma-separated list of patterns that control which `.env` variables are excluded when pushing with `ic env`:
+
+| Pattern    | Type         | Example match                        |
+|------------|--------------|--------------------------------------|
+| `DEV`      | Exact match  | Excludes `DEV` only                  |
+| `COMPOSE_` | Prefix match | Excludes `COMPOSE_FILE`, `COMPOSE_X` |
+| `SECRET*`  | Prefix match | Excludes `SECRET_KEY`, `SECRETABC`   |
+
+Rules:
+
+- Patterns ending with `_` or `*` are **prefix matches** (the `*` is stripped before comparison).
+- All other patterns are **exact matches**.
+- Both `ENV_EXCLUDES` and `ENV_EXCLUDE_PREFIXES` are read and merged with the built-in defaults.
+
+Example: `ENV_EXCLUDES=DEV,DEBUG,MY_SECRET_` excludes the exact keys `DEV` and `DEBUG`, plus any key starting with `MY_SECRET_`.
 
 ## Schema Directive
 

@@ -66,7 +66,7 @@ def find_repo_root() -> Path:
         current = parent
 
 
-DEFAULT_ENV_EXCLUDE_PREFIXES = [
+DEFAULT_ENV_EXCLUDES = [
     "COMPOSE_",
     "CONTAINER_NAME",
     "DOKPLOY_",
@@ -158,24 +158,49 @@ def resolve_refs(template: str, state: dict) -> str:
     return re.sub(r"\{(\w+)\}", replacer, template)
 
 
-def get_env_exclude_prefixes() -> list[str]:
-    """Merge default exclude prefixes with optional extras from .env."""
-    prefixes = list(DEFAULT_ENV_EXCLUDE_PREFIXES)
-    extras: str = config("ENV_EXCLUDE_PREFIXES", default="")  # type: ignore[assignment]
-    if extras:
-        prefixes.extend(p.strip() for p in extras.split(",") if p.strip())
-    return prefixes
+def get_env_excludes() -> list[str]:
+    """Merge default exclusion patterns with optional extras from .env.
+
+    Reads ``ENV_EXCLUDE_PREFIXES`` for backward compatibility and the new
+    ``ENV_EXCLUDES`` key.  Patterns ending with ``_`` or ``*`` are treated as
+    prefix matches; all other patterns are exact matches.
+    """
+    patterns = list(DEFAULT_ENV_EXCLUDES)
+    for env_key in ("ENV_EXCLUDES", "ENV_EXCLUDE_PREFIXES"):
+        extras: str = config(env_key, default="")  # type: ignore[assignment]
+        if extras:
+            patterns.extend(p.strip() for p in extras.split(",") if p.strip())
+    return patterns
 
 
-def filter_env(content: str, exclude_prefixes: list[str]) -> str:
-    """Strip comments, blank lines, and lines whose key starts with an excluded prefix."""
+def _is_env_excluded(key: str, patterns: list[str]) -> bool:
+    """Check if an env var key matches any exclusion pattern.
+
+    Patterns ending with ``_`` or ``*`` are prefix matches (the ``*`` is
+    stripped before comparison).  All other patterns are exact matches.
+    """
+    for pattern in patterns:
+        if pattern.endswith("*"):
+            if key.startswith(pattern[:-1]):
+                return True
+        elif pattern.endswith("_"):
+            if key.startswith(pattern):
+                return True
+        else:
+            if key == pattern:
+                return True
+    return False
+
+
+def filter_env(content: str, exclude_patterns: list[str]) -> str:
+    """Strip comments, blank lines, and lines whose key matches an exclusion pattern."""
     lines = []
     for line in content.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         key = stripped.split("=", 1)[0].strip()
-        if any(key.startswith(prefix) for prefix in exclude_prefixes):
+        if _is_env_excluded(key, exclude_patterns):
             continue
         lines.append(line)
     return "\n".join(lines) + "\n" if lines else ""
@@ -772,7 +797,7 @@ def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path)
             sys.exit(1)
 
         raw_env = env_file.read_text()
-        exclude_prefixes = get_env_exclude_prefixes()
+        exclude_prefixes = get_env_excludes()
         filtered = filter_env(raw_env, exclude_prefixes)
         total = len(filtered.strip().splitlines()) if filtered.strip() else 0
         print(f"Filtered .env: {total} vars (from {len(raw_env.splitlines())} lines)")
@@ -1029,7 +1054,7 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
         env_file = repo_root / ".env"
         if env_file.exists():
             raw_env = env_file.read_text()
-            exclude_prefixes = get_env_exclude_prefixes()
+            exclude_prefixes = get_env_excludes()
             filtered = filter_env(raw_env, exclude_prefixes)
             keys = _env_keys(filtered)
             for target_name in env_targets:
@@ -1073,7 +1098,7 @@ def _plan_redeploy(
     filtered_env: str | None = None
     if env_targets and env_file.exists():
         raw_env = env_file.read_text()
-        exclude_prefixes = get_env_exclude_prefixes()
+        exclude_prefixes = get_env_excludes()
         filtered_env = filter_env(raw_env, exclude_prefixes)
 
     for name, app_info in state["apps"].items():
