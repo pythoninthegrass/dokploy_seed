@@ -1101,10 +1101,7 @@ def _plan_redeploy(
             resolved_custom = resolve_refs(custom_env, state)
             desired_parts.append(resolved_custom)
 
-        if desired_parts:
-            desired_env = "\n".join(p.rstrip("\n") for p in desired_parts) + "\n"
-        else:
-            desired_env = ""
+        desired_env = "\n".join(p.rstrip("\n") for p in desired_parts) + "\n" if desired_parts else ""
 
         remote_keys = _env_keys(remote_env)
         desired_keys = _env_keys(desired_env)
@@ -1237,10 +1234,7 @@ def print_plan(changes: list[dict]) -> None:
         parent = change.get("parent")
         attrs = change.get("attrs", {})
 
-        if parent:
-            header = f'{rtype} "{name}" ({parent})'
-        else:
-            header = f'{rtype} "{name}"'
+        header = f'{rtype} "{name}" ({parent})' if parent else f'{rtype} "{name}"'
 
         print(f"  {sym} {header} {{")
 
