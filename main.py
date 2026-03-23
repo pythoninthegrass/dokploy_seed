@@ -71,6 +71,53 @@ def find_repo_root() -> Path:
         current = parent
 
 
+DATABASE_TYPES = {"postgres", "mysql", "mariadb", "mongo", "redis"}
+
+DATABASE_DEFAULTS = {
+    "postgres": "postgres:16",
+    "mysql": "mysql:8",
+    "mariadb": "mariadb:11",
+    "mongo": "mongo:7",
+    "redis": "redis:7",
+}
+
+
+def database_endpoint(db_type: str, action: str) -> str:
+    """Return the Dokploy API endpoint for a database operation."""
+    return f"{db_type}.{action}"
+
+
+def database_id_key(db_type: str) -> str:
+    """Return the ID field name for a database type."""
+    return f"{db_type}Id"
+
+
+def build_database_create_payload(name: str, db_def: dict, environment_id: str) -> dict:
+    """Build the API payload for creating a database resource."""
+    db_type = db_def["type"]
+    payload: dict = {
+        "name": name,
+        "environmentId": environment_id,
+        "dockerImage": db_def.get("dockerImage", DATABASE_DEFAULTS[db_type]),
+        "databasePassword": db_def["databasePassword"],
+    }
+
+    if db_def.get("description"):
+        payload["description"] = db_def["description"]
+
+    if db_type in ("postgres", "mysql", "mariadb"):
+        payload["databaseName"] = db_def["databaseName"]
+        payload["databaseUser"] = db_def["databaseUser"]
+
+    if db_type in ("mysql", "mariadb"):
+        payload["databaseRootPassword"] = db_def["databaseRootPassword"]
+
+    if db_type == "mongo":
+        payload["databaseUser"] = db_def["databaseUser"]
+
+    return payload
+
+
 DEFAULT_ENV_EXCLUDES = [
     "COMPOSE_",
     "CONTAINER_NAME",
@@ -1031,13 +1078,34 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
             resp = client.post("schedule.create", sched_payload)
             state["apps"][name]["schedules"][sched["name"]] = {"scheduleId": resp["scheduleId"]}
 
-    # 11. Save state
+    # 11. Databases
+    for db_def in cfg.get("database", []):
+        name = db_def["name"]
+        db_type = db_def["type"]
+        id_key = database_id_key(db_type)
+        print(f"Creating {db_type} database: {name}...")
+        payload = build_database_create_payload(name, db_def, environment_id)
+        resp = client.post(database_endpoint(db_type, "create"), payload)
+        db_id = resp[id_key]
+        app_name = resp.get("appName", name)
+        if "database" not in state:
+            state["database"] = {}
+        state["database"][name] = {id_key: db_id, "appName": app_name, "type": db_type}
+        print(f"  {name}: id={db_id} appName={app_name}")
+
+        print(f"  Deploying {name}...")
+        client.post(database_endpoint(db_type, "deploy"), {id_key: db_id})
+
+    # 12. Save state
     save_state(state, state_file)
     print("\nSetup complete!")
     print(f"  Project: {project_id}")
     for name, info in state["apps"].items():
         rid = info.get("composeId") or info.get("applicationId")
         print(f"  {name}: {rid}")
+    for name, info in state.get("database", {}).items():
+        id_key = database_id_key(info["type"])
+        print(f"  {name}: {info[id_key]} ({info['type']})")
 
 
 def cmd_env(
@@ -1203,6 +1271,13 @@ def cmd_status(client: DokployClient, state_file: Path) -> None:
             status = app.get("applicationStatus", "unknown")
         print(f"  {name:10s}  {status}")
 
+    for name, info in state.get("database", {}).items():
+        db_type = info["type"]
+        id_key = database_id_key(db_type)
+        remote: dict = client.get(database_endpoint(db_type, "one"), {id_key: info[id_key]})  # type: ignore[assignment]
+        status = remote.get("applicationStatus", "unknown")
+        print(f"  {name:10s}  {status}  ({db_type})")
+
 
 def _env_keys(env_blob: str | None) -> set[str]:
     """Extract variable names from a KEY=value env blob."""
@@ -1366,6 +1441,20 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
                     "attrs": {"keys": sorted(keys)},
                 }
             )
+
+    for db_def in cfg.get("database", []):
+        changes.append(
+            {
+                "action": "create",
+                "resource_type": "database",
+                "name": db_def["name"],
+                "parent": None,
+                "attrs": {
+                    "type": db_def["type"],
+                    "dockerImage": db_def.get("dockerImage", DATABASE_DEFAULTS[db_def["type"]]),
+                },
+            }
+        )
 
 
 def _plan_redeploy(

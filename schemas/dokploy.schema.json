@@ -352,6 +352,13 @@
           ]
         }
       }
+    },
+    "database": {
+      "type": "array",
+      "description": "Database resources managed by Dokploy (postgres, mysql, mariadb, mongo, redis)",
+      "items": {
+        "$ref": "#/$defs/database_entry"
+      }
     }
   },
   "$defs": {
@@ -502,6 +509,94 @@
           "description": "Strip path prefix before forwarding (default: false)"
         }
       }
+    },
+    "database_entry": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "databasePassword"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique database name within the project"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "postgres",
+            "mysql",
+            "mariadb",
+            "mongo",
+            "redis"
+          ],
+          "description": "Database engine type"
+        },
+        "dockerImage": {
+          "type": "string",
+          "description": "Docker image override (defaults: postgres:16, mysql:8, mariadb:11, mongo:7, redis:7)"
+        },
+        "databaseName": {
+          "type": "string",
+          "description": "Database name to create (required for postgres, mysql, mariadb)"
+        },
+        "databaseUser": {
+          "type": "string",
+          "description": "Database user (required for postgres, mysql, mariadb, mongo)"
+        },
+        "databasePassword": {
+          "type": "string",
+          "description": "Database password"
+        },
+        "databaseRootPassword": {
+          "type": "string",
+          "description": "Root password (required for mysql and mariadb)"
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional description for the database"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": ["postgres", "mysql", "mariadb"]
+              }
+            }
+          },
+          "then": {
+            "required": ["databaseName", "databaseUser"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": ["mysql", "mariadb"]
+              }
+            }
+          },
+          "then": {
+            "required": ["databaseRootPassword"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "mongo"
+              }
+            }
+          },
+          "then": {
+            "required": ["databaseUser"]
+          }
+        }
+      ]
     }
   }
 }

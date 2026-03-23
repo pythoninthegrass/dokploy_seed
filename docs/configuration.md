@@ -8,12 +8,13 @@
 
 ## Top-Level Keys
 
-| Key | Required | Description |
-|-----|----------|-------------|
-| `project` | yes | Project metadata, env targets, deploy order |
-| `github` | if github apps | GitHub defaults for all github-sourced apps |
-| `environments` | no | Per-environment overrides |
-| `apps` | yes | List of app definitions |
+| Key            | Required       | Description                                                         |
+| -------------- | -------------- | ------------------------------------------------------------------- |
+| `project`      | yes            | Project metadata, env targets, deploy order                         |
+| `github`       | if github apps | GitHub defaults for all github-sourced apps                         |
+| `environments` | no             | Per-environment overrides                                           |
+| `apps`         | yes            | List of app definitions                                             |
+| `database`     | no             | List of database resources (postgres, mysql, mariadb, mongo, redis) |
 
 ## `project`
 
@@ -168,6 +169,48 @@ environments:
 ```
 
 See `examples/docker-compose/` for a complete working example.
+
+## `database`
+
+Database resources managed by Dokploy. Created and deployed during `setup`, included in `status` output, and destroyed when the project is deleted via `destroy`.
+
+Databases are **not** part of `deploy_order` — they are automatically deployed immediately after creation during setup.
+
+| Key                               | Required                        | Description                                                      |
+| --------------------------------- | ------------------------------- | ---------------------------------------------------------------- |
+| `database[].name`                 | yes                             | Unique database name within the project                          |
+| `database[].type`                 | yes                             | Engine type: `postgres`, `mysql`, `mariadb`, `mongo`, or `redis` |
+| `database[].dockerImage`          | no                              | Docker image override (defaults per type)                        |
+| `database[].databaseName`         | postgres, mysql, mariadb        | Database name to create                                          |
+| `database[].databaseUser`         | postgres, mysql, mariadb, mongo | Database user                                                    |
+| `database[].databasePassword`     | yes                             | Database password                                                |
+| `database[].databaseRootPassword` | mysql, mariadb                  | Root password                                                    |
+| `database[].description`          | no                              | Optional description                                             |
+
+### Type-Specific Requirements
+
+| Type     | Required Fields                                                            |
+| -------- | -------------------------------------------------------------------------- |
+| postgres | `databaseName`, `databaseUser`, `databasePassword`                         |
+| mysql    | `databaseName`, `databaseUser`, `databasePassword`, `databaseRootPassword` |
+| mariadb  | `databaseName`, `databaseUser`, `databasePassword`, `databaseRootPassword` |
+| mongo    | `databaseUser`, `databasePassword`                                         |
+| redis    | `databasePassword`                                                         |
+
+### Example
+
+```yaml
+database:
+  - name: app-db
+    type: postgres
+    databaseName: myapp
+    databaseUser: myuser
+    databasePassword: changeme
+
+  - name: cache
+    type: redis
+    databasePassword: redis_secret
+```
 
 ## `{app_name}` Resolution
 

@@ -1,0 +1,20 @@
+project:
+  name: db-test
+  description: "Database test project"
+  deploy_order:
+    - - app
+
+apps:
+  - name: app
+    source: docker
+    dockerImage: nginx:alpine
+
+database:
+  - name: mydb
+    type: postgres
+    databaseName: myapp
+    databaseUser: myuser
+    databasePassword: secret123
+  - name: cache
+    type: redis
+    databasePassword: redis_secret

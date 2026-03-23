@@ -85,6 +85,12 @@ def schedules_config():
 
 
 @pytest.fixture
+def database_config():
+    """Config with database resources (postgres + redis)."""
+    return _load_fixture("database_config.yml")
+
+
+@pytest.fixture
 def dokploy_yml(tmp_path, minimal_config):
     """Write a minimal dokploy.yml in tmp_path and return the path."""
     config_file = tmp_path / "dokploy.yml"

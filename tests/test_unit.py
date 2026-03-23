@@ -2912,10 +2912,13 @@ class TestCmdApplyCallsReconcileMounts:
 class TestBuildPortPayload:
     def test_minimal_port(self):
         """build_port_payload with only required fields."""
-        result = dokploy.build_port_payload("app-1", {
-            "publishedPort": 8080,
-            "targetPort": 80,
-        })
+        result = dokploy.build_port_payload(
+            "app-1",
+            {
+                "publishedPort": 8080,
+                "targetPort": 80,
+            },
+        )
         assert result == {
             "applicationId": "app-1",
             "publishedPort": 8080,
@@ -2926,12 +2929,15 @@ class TestBuildPortPayload:
 
     def test_full_port(self):
         """build_port_payload with all fields."""
-        result = dokploy.build_port_payload("app-1", {
-            "publishedPort": 5432,
-            "targetPort": 5432,
-            "protocol": "udp",
-            "publishMode": "host",
-        })
+        result = dokploy.build_port_payload(
+            "app-1",
+            {
+                "publishedPort": 5432,
+                "targetPort": 5432,
+                "protocol": "udp",
+                "publishMode": "host",
+            },
+        )
         assert result == {
             "applicationId": "app-1",
             "publishedPort": 5432,
@@ -3060,9 +3066,7 @@ class TestReconcileAppPorts:
 
         dokploy.reconcile_app_ports(client, cfg, state, state_file)
 
-        client.get.assert_called_once_with(
-            "application.one", {"applicationId": "app-1"}
-        )
+        client.get.assert_called_once_with("application.one", {"applicationId": "app-1"})
 
     def test_skips_compose_apps(self, tmp_path):
         """reconcile_app_ports skips compose apps."""
@@ -3244,3 +3248,262 @@ class TestCmdApplyReconcilePorts:
         )
 
         assert "reconcile_app_ports" not in calls
+
+
+class TestDatabaseDefaults:
+    def test_default_images_for_all_types(self):
+        """Each supported database type has a default docker image."""
+        for db_type in ("postgres", "mysql", "mariadb", "mongo", "redis"):
+            assert db_type in dokploy.DATABASE_DEFAULTS
+
+    def test_supported_types(self):
+        """DATABASE_TYPES contains exactly the five supported types."""
+        assert dokploy.DATABASE_TYPES == {"postgres", "mysql", "mariadb", "mongo", "redis"}
+
+
+class TestBuildDatabaseCreatePayload:
+    def test_postgres_payload(self):
+        db_def = {
+            "name": "mydb",
+            "type": "postgres",
+            "databaseName": "myapp",
+            "databaseUser": "myuser",
+            "databasePassword": "secret123",
+        }
+        payload = dokploy.build_database_create_payload("mydb", db_def, "env-123")
+        assert payload["name"] == "mydb"
+        assert payload["environmentId"] == "env-123"
+        assert payload["databaseName"] == "myapp"
+        assert payload["databaseUser"] == "myuser"
+        assert payload["databasePassword"] == "secret123"
+        assert "dockerImage" in payload
+
+    def test_postgres_default_image(self):
+        db_def = {"name": "mydb", "type": "postgres", "databaseName": "x", "databaseUser": "u", "databasePassword": "p"}
+        payload = dokploy.build_database_create_payload("mydb", db_def, "env-1")
+        assert payload["dockerImage"] == dokploy.DATABASE_DEFAULTS["postgres"]
+
+    def test_custom_image(self):
+        db_def = {
+            "name": "mydb",
+            "type": "postgres",
+            "databaseName": "x",
+            "databaseUser": "u",
+            "databasePassword": "p",
+            "dockerImage": "postgres:15",
+        }
+        payload = dokploy.build_database_create_payload("mydb", db_def, "env-1")
+        assert payload["dockerImage"] == "postgres:15"
+
+    def test_mysql_includes_root_password(self):
+        db_def = {
+            "name": "db",
+            "type": "mysql",
+            "databaseName": "app",
+            "databaseUser": "u",
+            "databasePassword": "p",
+            "databaseRootPassword": "rootpw",
+        }
+        payload = dokploy.build_database_create_payload("db", db_def, "env-1")
+        assert payload["databaseRootPassword"] == "rootpw"
+
+    def test_mariadb_includes_root_password(self):
+        db_def = {
+            "name": "db",
+            "type": "mariadb",
+            "databaseName": "app",
+            "databaseUser": "u",
+            "databasePassword": "p",
+            "databaseRootPassword": "rootpw",
+        }
+        payload = dokploy.build_database_create_payload("db", db_def, "env-1")
+        assert payload["databaseRootPassword"] == "rootpw"
+
+    def test_redis_minimal_fields(self):
+        db_def = {"name": "cache", "type": "redis", "databasePassword": "p"}
+        payload = dokploy.build_database_create_payload("cache", db_def, "env-1")
+        assert payload["name"] == "cache"
+        assert payload["databasePassword"] == "p"
+        assert "databaseName" not in payload
+        assert "databaseUser" not in payload
+
+    def test_mongo_no_database_name(self):
+        db_def = {"name": "mdb", "type": "mongo", "databaseUser": "u", "databasePassword": "p"}
+        payload = dokploy.build_database_create_payload("mdb", db_def, "env-1")
+        assert "databaseName" not in payload
+        assert payload["databaseUser"] == "u"
+
+    def test_description_included(self):
+        db_def = {
+            "name": "mydb",
+            "type": "postgres",
+            "databaseName": "x",
+            "databaseUser": "u",
+            "databasePassword": "p",
+            "description": "Main database",
+        }
+        payload = dokploy.build_database_create_payload("mydb", db_def, "env-1")
+        assert payload["description"] == "Main database"
+
+
+class TestDatabaseApiEndpoint:
+    def test_endpoint_for_each_type(self):
+        """database_endpoint returns the correct API path for each type."""
+        assert dokploy.database_endpoint("postgres", "create") == "postgres.create"
+        assert dokploy.database_endpoint("mysql", "deploy") == "mysql.deploy"
+        assert dokploy.database_endpoint("redis", "one") == "redis.one"
+        assert dokploy.database_endpoint("mongo", "remove") == "mongo.remove"
+        assert dokploy.database_endpoint("mariadb", "deploy") == "mariadb.deploy"
+
+    def test_database_id_key(self):
+        """database_id_key returns the correct ID field name for each type."""
+        assert dokploy.database_id_key("postgres") == "postgresId"
+        assert dokploy.database_id_key("mysql") == "mysqlId"
+        assert dokploy.database_id_key("mariadb") == "mariadbId"
+        assert dokploy.database_id_key("mongo") == "mongoId"
+        assert dokploy.database_id_key("redis") == "redisId"
+
+
+class TestCmdSetupDatabases:
+    def _make_mock_client(self, db_responses=None):
+        client = MagicMock()
+        call_count = {"n": 0}
+        db_responses = db_responses or {}
+
+        def fake_post(endpoint, payload=None):
+            if endpoint == "project.create":
+                return {
+                    "project": {"projectId": "proj-1"},
+                    "environment": {"environmentId": "env-1"},
+                }
+            if endpoint == "application.create":
+                name = (payload or {}).get("name", "app")
+                return {"applicationId": f"app-{name}-id", "appName": f"app-{name}"}
+            # Database creates
+            for db_type in dokploy.DATABASE_TYPES:
+                if endpoint == f"{db_type}.create":
+                    db_name = (payload or {}).get("name", "db")
+                    id_key = dokploy.database_id_key(db_type)
+                    resp = db_responses.get(db_name, {id_key: f"{db_type}-{db_name}-id", "appName": f"{db_name}-app"})
+                    return resp
+                if endpoint == f"{db_type}.deploy":
+                    return {}
+            return {}
+
+        client.post = MagicMock(side_effect=fake_post)
+        client.get = MagicMock(return_value=[])
+        return client
+
+    def test_databases_created_during_setup(self, tmp_path, database_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, database_config, state_file)
+
+        create_calls = [call for call in client.post.call_args_list if call[0][0] == "postgres.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["name"] == "mydb"
+
+        redis_calls = [call for call in client.post.call_args_list if call[0][0] == "redis.create"]
+        assert len(redis_calls) == 1
+
+    def test_databases_deployed_after_creation(self, tmp_path, database_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, database_config, state_file)
+
+        deploy_calls = [call for call in client.post.call_args_list if call[0][0] in ("postgres.deploy", "redis.deploy")]
+        assert len(deploy_calls) == 2
+
+    def test_database_state_saved(self, tmp_path, database_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, database_config, state_file)
+
+        state = json.loads(state_file.read_text())
+        assert "database" in state
+        assert "mydb" in state["database"]
+        assert "postgresId" in state["database"]["mydb"]
+        assert "cache" in state["database"]
+        assert "redisId" in state["database"]["cache"]
+
+    def test_database_state_includes_type(self, tmp_path, database_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, database_config, state_file)
+
+        state = json.loads(state_file.read_text())
+        assert state["database"]["mydb"]["type"] == "postgres"
+        assert state["database"]["cache"]["type"] == "redis"
+
+    def test_no_databases_section_skips(self, tmp_path, minimal_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, minimal_config, state_file)
+
+        state = json.loads(state_file.read_text())
+        assert "database" not in state
+
+
+class TestCmdStatusDatabases:
+    def test_shows_database_status(self, tmp_path, monkeypatch, capsys):
+        state = {
+            "projectId": "proj-1",
+            "apps": {},
+            "database": {
+                "mydb": {"postgresId": "pg-1", "appName": "mydb-app", "type": "postgres"},
+            },
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps(state))
+
+        client = MagicMock()
+        client.get = MagicMock(return_value={"applicationStatus": "running"})
+
+        dokploy.cmd_status(client, state_file)
+
+        output = capsys.readouterr().out
+        assert "mydb" in output
+        assert "postgres" in output
+
+
+class TestComputePlanDatabases:
+    def _mock_client(self):
+        client = MagicMock()
+        client.get = MagicMock(return_value=[])
+        return client
+
+    def test_plan_initial_shows_database_creates(self, tmp_path, database_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._mock_client()
+
+        changes = dokploy.compute_plan(client, database_config, state_file, tmp_path)
+
+        db_creates = [c for c in changes if c["resource_type"] == "database"]
+        assert len(db_creates) == 2
+        names = {c["name"] for c in db_creates}
+        assert names == {"mydb", "cache"}
+
+    def test_plan_database_attrs(self, tmp_path, database_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._mock_client()
+
+        changes = dokploy.compute_plan(client, database_config, state_file, tmp_path)
+
+        pg_create = [c for c in changes if c["name"] == "mydb"][0]
+        assert pg_create["attrs"]["type"] == "postgres"
+        assert pg_create["action"] == "create"
+
+    def test_plan_no_databases_no_db_changes(self, tmp_path, minimal_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._mock_client()
+
+        changes = dokploy.compute_plan(client, minimal_config, state_file, tmp_path)
+
+        db_creates = [c for c in changes if c["resource_type"] == "database"]
+        assert len(db_creates) == 0

@@ -102,3 +102,25 @@ apps:
     env: |
       TZ=UTC
       CELERY_BROKER_URL=redis://{redis}:6379/0
+
+# Database resources (created and deployed during setup)
+# Supported types: postgres, mysql, mariadb, mongo, redis
+database:
+  - name: app-db
+    type: postgres
+    # dockerImage: postgres:16   # optional, defaults per type
+    databaseName: myapp
+    databaseUser: myuser
+    databasePassword: changeme
+    # description: "Primary application database"
+
+  # - name: app-cache
+  #   type: redis
+  #   databasePassword: redis_secret
+
+  # - name: app-mysql
+  #   type: mysql
+  #   databaseName: myapp
+  #   databaseUser: myuser
+  #   databasePassword: changeme
+  #   databaseRootPassword: rootpw
