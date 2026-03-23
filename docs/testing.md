@@ -114,18 +114,17 @@ def your_fixture():
     return _load_fixture("your_fixture.yml")
 ```
 
-## Importing `main.py`
+## Importing the Package
 
-`main.py` is a PEP 723 inline script, not a package. Tests import it using `importlib`:
+Tests import the `icarus` package aliased as `dokploy` for backward compatibility:
 
 ```python
-_SCRIPT = Path(__file__).resolve().parent.parent / "main.py"
-_spec = importlib.util.spec_from_file_location("dokploy", _SCRIPT)
-dokploy = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(dokploy)
+import icarus as dokploy
 ```
 
-This happens at module level in `test_unit.py` and `test_property.py`. Functions under test are then accessed as `dokploy.function_name()`.
+Functions under test are accessed as `dokploy.function_name()`. The `icarus.__init__` module re-exports all public (and test-relevant private) symbols from the submodules.
+
+When patching with `monkeypatch.setattr`, target the submodule where the name is looked up at runtime (e.g. `icarus.commands` for command functions, `icarus.ssh` for SSH helpers).
 
 ## Property-Based Tests (Hypothesis)
 

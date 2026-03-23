@@ -1,18 +1,14 @@
 """Unit tests for pure functions in main.py."""
 
-import importlib.util
+import argparse
+import icarus as dokploy
 import json
 import pytest
 import sys
 import yaml
+from icarus import commands as icarus_commands, ssh as icarus_ssh
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-# Import main.py as a module despite it being a PEP 723 script.
-_SCRIPT = Path(__file__).resolve().parent.parent / "main.py"
-_spec = importlib.util.spec_from_file_location("dokploy", _SCRIPT)
-dokploy = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(dokploy)
 
 pytestmark = pytest.mark.unit
 
@@ -343,7 +339,7 @@ class TestLoadSaveState:
 class TestArgparse:
     def test_valid_commands(self):
         for cmd in ["check", "setup", "env", "apply", "trigger", "status", "destroy", "import"]:
-            args = dokploy.argparse.ArgumentParser()
+            args = argparse.ArgumentParser()
             args.add_argument("--env", default=None)
             args.add_argument(
                 "command",
@@ -354,7 +350,7 @@ class TestArgparse:
             assert parsed.env == "prod"
 
     def test_invalid_command_rejected(self):
-        parser = dokploy.argparse.ArgumentParser()
+        parser = argparse.ArgumentParser()
         parser.add_argument("--env", default=None)
         parser.add_argument(
             "command",
@@ -364,7 +360,7 @@ class TestArgparse:
             parser.parse_args(["bogus"])
 
     def test_env_flag_parsed(self):
-        parser = dokploy.argparse.ArgumentParser()
+        parser = argparse.ArgumentParser()
         parser.add_argument("--env", default=None)
         parser.add_argument(
             "command",
@@ -702,7 +698,7 @@ class TestValidateConfigNewFixtures:
 class TestUnifiedApply:
     def test_trigger_command_accepted(self):
         """'trigger' is a valid CLI choice."""
-        parser = dokploy.argparse.ArgumentParser()
+        parser = argparse.ArgumentParser()
         parser.add_argument("--env", default=None)
         parser.add_argument(
             "command",
@@ -713,7 +709,7 @@ class TestUnifiedApply:
 
     def test_apply_still_valid_command(self):
         """'apply' remains a valid CLI choice."""
-        parser = dokploy.argparse.ArgumentParser()
+        parser = argparse.ArgumentParser()
         parser.add_argument("--env", default=None)
         parser.add_argument(
             "command",
@@ -731,10 +727,12 @@ class TestUnifiedApply:
         calls = []
         state_file = tmp_path / ".dokploy-state" / "prod.json"
 
-        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: calls.append("check"))
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: calls.append("setup"))
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: calls.append("env"))
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: calls.append("check"))
+        monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: calls.append("setup"))
+        monkeypatch.setattr(
+            icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: calls.append("env")
+        )
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
 
         dokploy.cmd_apply(
             repo_root=tmp_path,
@@ -752,11 +750,13 @@ class TestUnifiedApply:
         state_file.parent.mkdir(parents=True)
         state_file.write_text("{}")
 
-        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: calls.append("check"))
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: calls.append("setup"))
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: calls.append("env"))
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
-        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: calls.append("check"))
+        monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: calls.append("setup"))
+        monkeypatch.setattr(
+            icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: calls.append("env")
+        )
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
+        monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
 
         dokploy.cmd_apply(
             repo_root=tmp_path,
@@ -775,13 +775,13 @@ class TestUnifiedApply:
         state_file.parent.mkdir(parents=True)
         state_file.write_text("{}")
 
-        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
         monkeypatch.setattr(
-            dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
         )
-        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
 
         dokploy.cmd_apply(
             repo_root=tmp_path,
@@ -797,11 +797,11 @@ class TestUnifiedApply:
         trigger_kwargs = {}
         state_file = tmp_path / ".dokploy-state" / "prod.json"
 
-        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
         monkeypatch.setattr(
-            dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
+            icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
         )
 
         dokploy.cmd_apply(
@@ -817,10 +817,10 @@ class TestUnifiedApply:
         """Each phase prints a header like '==> Phase N/4: ...'."""
         state_file = tmp_path / ".dokploy-state" / "prod.json"
 
-        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
 
         dokploy.cmd_apply(
             repo_root=tmp_path,
@@ -844,10 +844,12 @@ class TestUnifiedApply:
             calls.append("check")
             raise SystemExit(1)
 
-        monkeypatch.setattr(dokploy, "cmd_check", failing_check)
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: calls.append("setup"))
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: calls.append("env"))
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
+        monkeypatch.setattr(icarus_commands, "cmd_check", failing_check)
+        monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: calls.append("setup"))
+        monkeypatch.setattr(
+            icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: calls.append("env")
+        )
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
 
         with pytest.raises(SystemExit):
             dokploy.cmd_apply(
@@ -942,11 +944,11 @@ class TestCleanupStaleRoutes:
         state_file.parent.mkdir(parents=True)
         state_file.write_text("{}")
 
-        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
-        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
-        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
 
         dokploy.cmd_apply(
             repo_root=tmp_path,
@@ -962,11 +964,11 @@ class TestCleanupStaleRoutes:
         calls = []
         state_file = tmp_path / ".dokploy-state" / "prod.json"
 
-        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
-        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
 
         dokploy.cmd_apply(
             repo_root=tmp_path,
@@ -979,7 +981,7 @@ class TestCleanupStaleRoutes:
 
     def test_cleanup_skipped_when_no_ssh_config(self, monkeypatch, capsys):
         """cleanup_stale_routes skips gracefully when DOKPLOY_SSH_HOST is not set."""
-        monkeypatch.setattr(dokploy, "config", MagicMock(side_effect=lambda key, default="": default))
+        monkeypatch.setattr(icarus_ssh, "config", MagicMock(side_effect=lambda key, default="": default))
 
         state = {"apps": {"web": {"appName": "app-web-abc"}}}
         cfg = {
@@ -1267,7 +1269,7 @@ class TestBuildDockerUrl:
 class TestGetDockerClient:
     def test_creates_client_with_ssh_url(self):
         ssh_cfg = {"host": "dokploy.example.com", "user": "ubuntu", "port": 22}
-        with patch.object(dokploy.docker, "DockerClient") as mock_cls:
+        with patch.object(icarus_ssh.docker, "DockerClient") as mock_cls:
             dokploy.get_docker_client(ssh_cfg)
             mock_cls.assert_called_once_with(
                 base_url="ssh://ubuntu@dokploy.example.com",
@@ -1283,7 +1285,7 @@ class TestGetSshConfig:
             "DOKPLOY_SSH_PORT": "2222",
         }
         with patch.object(
-            dokploy,
+            icarus_ssh,
             "config",
             side_effect=lambda k, **kw: env.get(k, kw.get("default", "")),
         ):
@@ -1296,14 +1298,14 @@ class TestGetSshConfig:
         def _config(k, **kw):
             return env.get(k, kw.get("default", ""))
 
-        with patch.object(dokploy, "config", side_effect=_config):
+        with patch.object(icarus_ssh, "config", side_effect=_config):
             cfg = dokploy.get_ssh_config()
         assert cfg == {"host": "myhost.com", "user": "root", "port": 22}
 
     def test_missing_host_exits(self, capsys):
         with (
             patch.object(
-                dokploy,
+                icarus_ssh,
                 "config",
                 side_effect=lambda k, **kw: kw.get("default", ""),
             ),
@@ -1688,7 +1690,7 @@ class TestCmdClean:
         state_file.parent.mkdir(parents=True)
         state_file.write_text(json.dumps(state))
 
-        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda s, c: calls.append(("cleanup", s, c)))
+        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda s, c: calls.append(("cleanup", s, c)))
 
         cfg = {"apps": [{"name": "web"}]}
         dokploy.cmd_clean(cfg, state_file)
@@ -1708,7 +1710,7 @@ class TestCmdDestroyCallsCleanup:
         state_file.parent.mkdir(parents=True)
         state_file.write_text(json.dumps(state))
 
-        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda s, c: order.append("cleanup"))
+        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda s, c: order.append("cleanup"))
 
         client = MagicMock()
         client.post = MagicMock(side_effect=lambda *a, **kw: order.append("project.remove"))
@@ -1723,7 +1725,7 @@ class TestCmdDestroyCallsCleanup:
 class TestCleanupSkipsWhenAllSshVarsMissing:
     def test_skips_when_all_three_ssh_vars_empty(self, monkeypatch, capsys):
         """cleanup_stale_routes skips when DOKPLOY_SSH_HOST, _USER, and _PORT are all empty."""
-        monkeypatch.setattr(dokploy, "config", MagicMock(side_effect=lambda key, default="": default))
+        monkeypatch.setattr(icarus_ssh, "config", MagicMock(side_effect=lambda key, default="": default))
 
         state = {"apps": {"web": {"appName": "app-web-abc"}}}
         cfg = {
@@ -1745,12 +1747,12 @@ class TestCleanupSkipsWhenAllSshVarsMissing:
                 return "server.example.com"
             return default
 
-        monkeypatch.setattr(dokploy, "config", MagicMock(side_effect=fake_config))
+        monkeypatch.setattr(icarus_ssh, "config", MagicMock(side_effect=fake_config))
 
         ssh_mock = MagicMock()
         ssh_mock.exec_command.return_value = (None, MagicMock(read=lambda: b""), None)
         ssh_class = MagicMock(return_value=ssh_mock)
-        monkeypatch.setattr(dokploy.paramiko, "SSHClient", ssh_class)
+        monkeypatch.setattr(icarus_ssh.paramiko, "SSHClient", ssh_class)
 
         state = {"apps": {"web": {"appName": "app-web-abc"}}}
         cfg = {
@@ -2269,7 +2271,7 @@ class TestComputePlanOrphanedState:
         state_file.write_text(json.dumps(state))
 
         client = MagicMock()
-        client.get.side_effect = lambda endpoint, params=None: ([] if endpoint == "project.all" else {})
+        client.get.side_effect = lambda endpoint, params=None: [] if endpoint == "project.all" else {}
 
         changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
 
@@ -2862,15 +2864,15 @@ class TestCmdApplyCallsReconcileMounts:
         state_file.parent.mkdir(parents=True)
         state_file.write_text("{}")
 
-        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
-        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
-        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: None)
-        monkeypatch.setattr(dokploy, "reconcile_app_domains", lambda client, cfg, state, sf: None)
-        monkeypatch.setattr(dokploy, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(
-            dokploy,
+            icarus_commands,
             "reconcile_app_mounts",
             lambda client, cfg, state, sf: calls.append("reconcile_app_mounts"),
         )
@@ -2889,12 +2891,12 @@ class TestCmdApplyCallsReconcileMounts:
         calls = []
         state_file = tmp_path / ".dokploy-state" / "prod.json"
 
-        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
         monkeypatch.setattr(
-            dokploy,
+            icarus_commands,
             "reconcile_app_mounts",
             lambda client, cfg, state, sf: calls.append("reconcile_app_mounts"),
         )
@@ -3466,17 +3468,17 @@ class TestCmdApplyReconcileAppSettings:
 
         state_file.write_text(json.dumps({"projectId": "proj-1", "apps": {}}))
 
-        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
-        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: None)
-        monkeypatch.setattr(dokploy, "reconcile_app_domains", lambda client, cfg, state, sf: None)
-        monkeypatch.setattr(dokploy, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
-        monkeypatch.setattr(dokploy, "reconcile_app_mounts", lambda client, cfg, state, sf: None)
-        monkeypatch.setattr(dokploy, "reconcile_app_ports", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_mounts", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_ports", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(
-            dokploy,
+            icarus_commands,
             "reconcile_app_settings",
             lambda client, cfg, state: calls.append("reconcile_app_settings"),
         )
@@ -3645,16 +3647,16 @@ class TestCmdApplyReconcilePorts:
 
         state_file.write_text(json.dumps({"projectId": "proj-1", "apps": {}}))
 
-        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
-        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: None)
-        monkeypatch.setattr(dokploy, "reconcile_app_domains", lambda client, cfg, state, sf: None)
-        monkeypatch.setattr(dokploy, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
-        monkeypatch.setattr(dokploy, "reconcile_app_mounts", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_mounts", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(
-            dokploy,
+            icarus_commands,
             "reconcile_app_ports",
             lambda client, cfg, state, sf: calls.append("reconcile_app_ports"),
         )
@@ -3673,12 +3675,12 @@ class TestCmdApplyReconcilePorts:
         calls = []
         state_file = tmp_path / ".dokploy-state" / "prod.json"
 
-        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
-        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
         monkeypatch.setattr(
-            dokploy,
+            icarus_commands,
             "reconcile_app_ports",
             lambda client, cfg, state, sf: calls.append("reconcile_app_ports"),
         )
@@ -3701,7 +3703,7 @@ class TestDatabaseDefaults:
 
     def test_supported_types(self):
         """DATABASE_TYPES contains exactly the five supported types."""
-        assert dokploy.DATABASE_TYPES == {"postgres", "mysql", "mariadb", "mongo", "redis"}
+        assert {"postgres", "mysql", "mariadb", "mongo", "redis"} == dokploy.DATABASE_TYPES
 
 
 class TestBuildDatabaseCreatePayload:

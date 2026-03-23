@@ -2,21 +2,30 @@
 
 ## Project Overview
 
-`icarus` — a config-driven deployment tool for [Dokploy](https://dokploy.com). Installable via `uv tool install` or runnable standalone as a PEP 723 script. Define apps, domains, deploy order, and environment overrides in `dokploy.yml`; the tool handles all Dokploy API calls.
+`icarus` — a config-driven deployment tool for [Dokploy](https://dokploy.com). Installable via `uv tool install`. Define apps, domains, deploy order, and environment overrides in `dokploy.yml`; the tool handles all Dokploy API calls.
 
 ## Tech Stack
 
-- **Python 3.13** — dual-mode: PEP 723 inline script (`main.py`) + `uv_build` packaging for tool install
-- **uv** for execution (`uv run --script`) and distribution (`uv tool install`)
+- **Python 3.13** — `uv_build` packaging for tool install
+- **uv** for distribution (`uv tool install`)
 - Dependencies: `docker[ssh]`, `httpx`, `python-decouple`, `pyyaml`
 
 ## Project Structure
 
 ```text
-main.py                     # PEP 723 standalone script + all logic
+main.py                     # Thin CLI router (imports from icarus package)
 src/icarus/
-  __init__.py               # Re-exports main for package distribution
-  main.py                   # Symlink to ../../main.py
+  __init__.py               # Re-exports all public symbols (FastAPI-style)
+  cli.py                    # argparse + match/case dispatch (main entry point)
+  config.py                 # Config singleton, find_repo_root
+  schema.py                 # dokploy.yml loading, validation, merging
+  env.py                    # Env var filtering, resolve_refs
+  client.py                 # DokployClient, state load/save
+  payloads.py               # Payload builders, DB constants, compose helpers
+  reconcile.py              # Reconciliation logic for redeploy
+  plan.py                   # Plan/diff logic, cmd_plan
+  ssh.py                    # SSH/Docker/Traefik/container helpers
+  commands.py               # All cmd_* command implementations
 pyproject.toml              # uv_build backend + ic entry point
 dokploy.yml.example         # Annotated starter config
 schemas/dokploy.schema.json # JSON Schema for dokploy.yml
@@ -56,14 +65,14 @@ ic --env prod exec django -- python manage.py shell  # Run command
 uv tool install ~/git/icarus --force --reinstall
 ```
 
-### Standalone (no install)
+### Development (no install)
 
 Make sure to run `uv sync --all-extras` to get production and development dependencies first.
 
 ```bash
-uv run --script main.py --help            # Show usage
-uv run --script main.py check             # Pre-flight checks
-uv run --script main.py --env prod setup  # Create project
+uv run python main.py --help              # Show usage
+uv run python main.py check               # Pre-flight checks
+uv run python main.py --env prod setup    # Create project
 ```
 
 ## Testing

@@ -1,6 +1,7 @@
 """Property-based tests for main.py pure functions using Hypothesis."""
 
 import copy
+import icarus as dokploy
 import importlib.util
 import pytest
 import re
@@ -20,12 +21,6 @@ dokploy_config = strategies.dokploy_config
 env_content = strategies.env_content
 exclude_prefixes = strategies.exclude_prefixes
 state_dict = strategies.state_dict
-
-# Import main.py as a module despite it being a PEP 723 script.
-_SCRIPT = Path(__file__).resolve().parent.parent / "main.py"
-_spec = importlib.util.spec_from_file_location("dokploy", _SCRIPT)
-dokploy = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(dokploy)
 
 pytestmark = pytest.mark.property
 

@@ -1,19 +1,14 @@
 """Integration tests for DokployClient and cmd_* functions."""
 
 import httpx
-import importlib.util
+import icarus as dokploy
 import json
 import pytest
 import respx
 import yaml
+from icarus import commands as icarus_commands
 from pathlib import Path
 from unittest.mock import patch
-
-# Import main.py as a module despite it being a PEP 723 script.
-_SCRIPT = Path(__file__).resolve().parent.parent / "main.py"
-_spec = importlib.util.spec_from_file_location("dokploy", _SCRIPT)
-dokploy = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(dokploy)
 
 pytestmark = pytest.mark.integration
 
@@ -163,7 +158,7 @@ class TestCmdCheck:
                 return kwargs["default"]
             raise UndefinedValueError(f"{key} not found")
 
-        monkeypatch.setattr(dokploy, "config", _missing_config)
+        monkeypatch.setattr(icarus_commands, "config", _missing_config)
 
         cfg = {"project": {"name": "test"}, "apps": []}
         (tmp_path / "dokploy.yml").write_text(yaml.dump(cfg))
