@@ -2507,3 +2507,403 @@ class TestPlanDomainChanges:
         updated = [c for c in domain_changes if c["action"] == "update"]
         assert len(updated) == 1
         assert updated[0]["name"] == "kept.example.com"
+
+
+class TestMountReconciliation:
+    def test_reconcile_creates_new_deletes_removed_updates_existing(self):
+        """reconcile_mounts creates new, updates changed, deletes removed."""
+        existing = [
+            {
+                "mountId": "m1",
+                "type": "volume",
+                "mountPath": "/data",
+                "volumeName": "old-vol",
+            },
+            {
+                "mountId": "m2",
+                "type": "bind",
+                "mountPath": "/logs",
+                "hostPath": "/host/logs",
+            },
+        ]
+        desired = [
+            {"type": "volume", "target": "/data", "source": "new-vol"},
+            {"type": "bind", "target": "/config", "source": "/host/config"},
+        ]
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "mounts.create": {"mountId": "m3"},
+        }.get(endpoint, {})
+
+        result = dokploy.reconcile_mounts(client, "app-1", existing, desired)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "mounts.update"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["mountId"] == "m1"
+        assert update_calls[0][0][1]["volumeName"] == "new-vol"
+
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "mounts.remove"]
+        assert len(delete_calls) == 1
+        assert delete_calls[0][0][1]["mountId"] == "m2"
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "mounts.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["mountPath"] == "/config"
+
+        assert "/data" in result
+        assert result["/data"]["mountId"] == "m1"
+        assert "/config" in result
+        assert result["/config"]["mountId"] == "m3"
+        assert "/logs" not in result
+
+    def test_reconcile_no_changes(self):
+        """reconcile_mounts does nothing when desired matches existing."""
+        existing = [
+            {
+                "mountId": "m1",
+                "type": "volume",
+                "mountPath": "/data",
+                "volumeName": "my-vol",
+            },
+        ]
+        desired = [
+            {"type": "volume", "target": "/data", "source": "my-vol"},
+        ]
+        client = MagicMock()
+        dokploy.reconcile_mounts(client, "app-1", existing, desired)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "mounts.update"]
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "mounts.remove"]
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "mounts.create"]
+        assert len(update_calls) == 0
+        assert len(delete_calls) == 0
+        assert len(create_calls) == 0
+
+    def test_reconcile_all_removed(self):
+        """reconcile_mounts deletes all when desired is empty."""
+        existing = [
+            {
+                "mountId": "m1",
+                "type": "volume",
+                "mountPath": "/data",
+                "volumeName": "my-vol",
+            },
+        ]
+        client = MagicMock()
+        result = dokploy.reconcile_mounts(client, "app-1", existing, [])
+
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "mounts.remove"]
+        assert len(delete_calls) == 1
+        assert delete_calls[0][0][1]["mountId"] == "m1"
+        assert result == {}
+
+    def test_reconcile_bind_mount_update(self):
+        """reconcile_mounts detects hostPath change for bind mounts."""
+        existing = [
+            {
+                "mountId": "m1",
+                "type": "bind",
+                "mountPath": "/app/data",
+                "hostPath": "/old/path",
+            },
+        ]
+        desired = [
+            {"type": "bind", "target": "/app/data", "source": "/new/path"},
+        ]
+        client = MagicMock()
+        dokploy.reconcile_mounts(client, "app-1", existing, desired)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "mounts.update"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["hostPath"] == "/new/path"
+
+
+class TestPlanMountChanges:
+    def test_plan_redeploy_shows_mount_changes(self, tmp_path):
+        """_plan_redeploy detects mount additions, removals, and updates."""
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                },
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": {"type": "docker", "image": "nginx"},
+                    "volumes": [
+                        {"type": "volume", "target": "/data", "source": "new-vol"},
+                        {"type": "bind", "target": "/config", "source": "/host/config"},
+                    ],
+                },
+            ],
+        }
+        remote_mounts = [
+            {
+                "mountId": "m1",
+                "type": "volume",
+                "mountPath": "/data",
+                "volumeName": "old-vol",
+            },
+            {
+                "mountId": "m2",
+                "type": "bind",
+                "mountPath": "/logs",
+                "hostPath": "/host/logs",
+            },
+        ]
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "application.one":
+                return {"env": "", "mounts": remote_mounts}
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        mount_changes = [c for c in changes if c["resource_type"] == "mount"]
+        actions = {c["action"] for c in mount_changes}
+        assert "create" in actions
+        assert "destroy" in actions
+        assert "update" in actions
+
+        created = [c for c in mount_changes if c["action"] == "create"]
+        assert len(created) == 1
+        assert created[0]["name"] == "/host/config -> /config"
+
+        destroyed = [c for c in mount_changes if c["action"] == "destroy"]
+        assert len(destroyed) == 1
+        assert destroyed[0]["name"] == "/host/logs -> /logs"
+
+        updated = [c for c in mount_changes if c["action"] == "update"]
+        assert len(updated) == 1
+        assert updated[0]["name"] == "new-vol -> /data"
+
+
+class TestReconcileAppMounts:
+    def test_fetches_mounts_from_application_one(self, tmp_path):
+        """reconcile_app_mounts reads mounts from application.one, not a separate endpoint."""
+        state_file = tmp_path / "state.json"
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {"applicationId": "app-1"},
+            },
+        }
+        dokploy.save_state(state, state_file)
+
+        cfg = {
+            "apps": [
+                {
+                    "name": "web",
+                    "source": {"type": "docker", "image": "nginx"},
+                    "volumes": [
+                        {"type": "volume", "target": "/data", "source": "my-vol"},
+                    ],
+                },
+            ],
+        }
+
+        client = MagicMock()
+        client.get.return_value = {
+            "mounts": [
+                {
+                    "mountId": "m1",
+                    "type": "volume",
+                    "mountPath": "/data",
+                    "volumeName": "my-vol",
+                },
+            ],
+        }
+
+        dokploy.reconcile_app_mounts(client, cfg, state, state_file)
+
+        client.get.assert_called_once_with("application.one", {"applicationId": "app-1"})
+
+    def test_creates_and_deletes_mounts(self, tmp_path):
+        """reconcile_app_mounts creates new mounts and removes stale ones."""
+        state_file = tmp_path / "state.json"
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {"applicationId": "app-1"},
+            },
+        }
+        dokploy.save_state(state, state_file)
+
+        cfg = {
+            "apps": [
+                {
+                    "name": "web",
+                    "source": {"type": "docker", "image": "nginx"},
+                    "volumes": [
+                        {"type": "volume", "target": "/new", "source": "new-vol"},
+                    ],
+                },
+            ],
+        }
+
+        client = MagicMock()
+        client.get.return_value = {
+            "mounts": [
+                {
+                    "mountId": "m1",
+                    "type": "bind",
+                    "mountPath": "/old",
+                    "hostPath": "/host/old",
+                },
+            ],
+        }
+        client.post.side_effect = lambda endpoint, payload: {
+            "mounts.create": {"mountId": "m2"},
+        }.get(endpoint, {})
+
+        dokploy.reconcile_app_mounts(client, cfg, state, state_file)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "mounts.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["mountPath"] == "/new"
+
+        remove_calls = [c for c in client.post.call_args_list if c[0][0] == "mounts.remove"]
+        assert len(remove_calls) == 1
+        assert remove_calls[0][0][1]["mountId"] == "m1"
+
+        saved = dokploy.load_state(state_file)
+        assert "/new" in saved["apps"]["web"]["mounts"]
+        assert saved["apps"]["web"]["mounts"]["/new"]["mountId"] == "m2"
+
+    def test_skips_compose_apps(self, tmp_path):
+        """reconcile_app_mounts skips compose apps (mounts are app-only)."""
+        state_file = tmp_path / "state.json"
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "stack": {"composeId": "comp-1", "source": "compose"},
+            },
+        }
+        dokploy.save_state(state, state_file)
+
+        cfg = {
+            "apps": [
+                {
+                    "name": "stack",
+                    "source": "compose",
+                    "volumes": [
+                        {"type": "volume", "target": "/data", "source": "vol"},
+                    ],
+                },
+            ],
+        }
+
+        client = MagicMock()
+        dokploy.reconcile_app_mounts(client, cfg, state, state_file)
+
+        client.get.assert_not_called()
+        client.post.assert_not_called()
+
+    def test_removes_all_when_volumes_cleared(self, tmp_path):
+        """reconcile_app_mounts removes all mounts when volumes removed from config."""
+        state_file = tmp_path / "state.json"
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                    "mounts": {"/data": {"mountId": "m1"}},
+                },
+            },
+        }
+        dokploy.save_state(state, state_file)
+
+        cfg = {
+            "apps": [
+                {
+                    "name": "web",
+                    "source": {"type": "docker", "image": "nginx"},
+                },
+            ],
+        }
+
+        client = MagicMock()
+        client.get.return_value = {
+            "mounts": [
+                {
+                    "mountId": "m1",
+                    "type": "volume",
+                    "mountPath": "/data",
+                    "volumeName": "my-vol",
+                },
+            ],
+        }
+
+        dokploy.reconcile_app_mounts(client, cfg, state, state_file)
+
+        remove_calls = [c for c in client.post.call_args_list if c[0][0] == "mounts.remove"]
+        assert len(remove_calls) == 1
+        assert remove_calls[0][0][1]["mountId"] == "m1"
+
+        saved = dokploy.load_state(state_file)
+        assert saved["apps"]["web"]["mounts"] == {}
+
+
+class TestCmdApplyCallsReconcileMounts:
+    def test_redeploy_calls_reconcile_app_mounts(self, tmp_path, monkeypatch):
+        """cmd_apply calls reconcile_app_mounts during redeploy."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text("{}")
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: None)
+        monkeypatch.setattr(dokploy, "reconcile_app_domains", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(dokploy, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(
+            dokploy,
+            "reconcile_app_mounts",
+            lambda client, cfg, state, sf: calls.append("reconcile_app_mounts"),
+        )
+
+        dokploy.cmd_apply(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "reconcile_app_mounts" in calls
+
+    def test_fresh_deploy_does_not_call_reconcile_app_mounts(self, tmp_path, monkeypatch):
+        """cmd_apply does NOT call reconcile_app_mounts on fresh deploy."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            dokploy,
+            "reconcile_app_mounts",
+            lambda client, cfg, state, sf: calls.append("reconcile_app_mounts"),
+        )
+
+        dokploy.cmd_apply(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "reconcile_app_mounts" not in calls

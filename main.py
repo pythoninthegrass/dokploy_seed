@@ -436,6 +436,74 @@ def reconcile_app_schedules(
         save_state(state, state_file)
 
 
+def reconcile_mounts(
+    client: "DokployClient",
+    app_id: str,
+    existing: list[dict],
+    desired: list[dict],
+) -> dict:
+    """Reconcile mounts: update existing by mountPath, create new, delete removed.
+
+    Returns a dict mapping mountPath -> {"mountId": ...} for state storage.
+    """
+    existing_by_path = {m["mountPath"]: m for m in existing}
+    desired_by_path = {m["target"]: m for m in desired}
+
+    result_state = {}
+
+    for path, mount in desired_by_path.items():
+        payload = build_mount_payload(app_id, mount)
+        if path in existing_by_path:
+            ex = existing_by_path[path]
+            mount_id = ex["mountId"]
+            needs_update = (
+                payload.get("type") != ex.get("type")
+                or payload.get("volumeName") != ex.get("volumeName")
+                or payload.get("hostPath") != ex.get("hostPath")
+            )
+            if needs_update:
+                update_payload = {**payload, "mountId": mount_id}
+                update_payload.pop("serviceId", None)
+                update_payload.pop("serviceType", None)
+                client.post("mounts.update", update_payload)
+            result_state[path] = {"mountId": mount_id}
+        else:
+            resp = client.post("mounts.create", payload)
+            result_state[path] = {"mountId": resp["mountId"]}
+
+    for path, ex in existing_by_path.items():
+        if path not in desired_by_path:
+            client.post("mounts.remove", {"mountId": ex["mountId"]})
+
+    return result_state
+
+
+def reconcile_app_mounts(
+    client: "DokployClient",
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+) -> None:
+    """Reconcile mounts for all apps on redeploy."""
+    changed = False
+    for app_def in cfg.get("apps", []):
+        if is_compose(app_def):
+            continue
+        volumes = app_def.get("volumes")
+        name = app_def["name"]
+        if volumes is None and "mounts" not in state["apps"].get(name, {}):
+            continue
+        app_id = state["apps"][name]["applicationId"]
+        remote = client.get("application.one", {"applicationId": app_id})
+        existing = remote.get("mounts") or []
+        desired = volumes or []
+        new_state = reconcile_mounts(client, app_id, existing, desired)
+        state["apps"][name]["mounts"] = new_state
+        changed = True
+    if changed:
+        save_state(state, state_file)
+
+
 def reconcile_domains(
     client: "DokployClient",
     resource_id: str,
@@ -1019,6 +1087,7 @@ def cmd_apply(
         cleanup_stale_routes(load_state(state_file), cfg)
         reconcile_app_domains(client, cfg, load_state(state_file), state_file)
         reconcile_app_schedules(client, cfg, load_state(state_file), state_file)
+        reconcile_app_mounts(client, cfg, load_state(state_file), state_file)
 
     print("\n==> Phase 4/4: trigger")
     cmd_trigger(client, cfg, state_file, redeploy=is_redeploy)
@@ -1310,6 +1379,65 @@ def _plan_redeploy(
 
         if compose or app_def is None:
             continue
+
+        volumes = app_def.get("volumes")
+        if volumes is not None or "mounts" in state["apps"].get(name, {}):
+            remote_mounts = remote.get("mounts") or []
+
+            desired_mounts = volumes or []
+            existing_by_path = {m["mountPath"]: m for m in remote_mounts}
+            desired_by_path = {m["target"]: m for m in desired_mounts}
+
+            for target, mount in desired_by_path.items():
+                source = mount["source"]
+                display_name = f"{source} -> {target}"
+                if target in existing_by_path:
+                    ex = existing_by_path[target]
+                    payload = build_mount_payload(app_info["applicationId"], mount)
+                    diffs: dict = {}
+                    for key in ("type", "volumeName", "hostPath"):
+                        old_val = ex.get(key)
+                        new_val = payload.get(key)
+                        if old_val != new_val:
+                            diffs[key] = (old_val, new_val)
+                    if diffs:
+                        changes.append(
+                            {
+                                "action": "update",
+                                "resource_type": "mount",
+                                "name": display_name,
+                                "parent": name,
+                                "attrs": diffs,
+                            }
+                        )
+                else:
+                    changes.append(
+                        {
+                            "action": "create",
+                            "resource_type": "mount",
+                            "name": display_name,
+                            "parent": name,
+                            "attrs": {
+                                "type": mount["type"],
+                                "source": source,
+                                "target": target,
+                            },
+                        }
+                    )
+
+            for target, ex in existing_by_path.items():
+                if target not in desired_by_path:
+                    ex_source = ex.get("hostPath") or ex.get("volumeName") or ""
+                    changes.append(
+                        {
+                            "action": "destroy",
+                            "resource_type": "mount",
+                            "name": f"{ex_source} -> {target}",
+                            "parent": name,
+                            "attrs": {"mountPath": target},
+                        }
+                    )
+
         schedules = app_def.get("schedules")
         if schedules is None and "schedules" not in state["apps"].get(name, {}):
             continue
