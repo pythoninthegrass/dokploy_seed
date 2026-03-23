@@ -436,6 +436,78 @@ def reconcile_app_schedules(
         save_state(state, state_file)
 
 
+def reconcile_domains(
+    client: "DokployClient",
+    resource_id: str,
+    existing: list[dict],
+    desired: list[dict],
+    *,
+    compose: bool = False,
+) -> dict:
+    """Reconcile domains: update existing by host, create new, delete removed.
+
+    Returns a dict mapping host -> {"domainId": ...} for state storage.
+    """
+    existing_by_host = {d["host"]: d for d in existing}
+    desired_by_host = {d["host"]: d for d in desired}
+
+    result_state = {}
+
+    for host, dom in desired_by_host.items():
+        payload = build_domain_payload(resource_id, dom, compose=compose)
+        if host in existing_by_host:
+            ex = existing_by_host[host]
+            domain_id = ex["domainId"]
+            needs_update = any(
+                payload.get(key) != ex.get(key)
+                for key in ("port", "https", "certificateType", "path", "internalPath", "stripPath")
+            )
+            if needs_update:
+                update_payload = {k: v for k, v in payload.items() if k not in ("applicationId", "composeId", "domainType")}
+                update_payload["domainId"] = domain_id
+                client.post("domain.update", update_payload)
+            result_state[host] = {"domainId": domain_id}
+        else:
+            resp = client.post("domain.create", payload)
+            result_state[host] = {"domainId": resp["domainId"]}
+
+    for host, ex in existing_by_host.items():
+        if host not in desired_by_host:
+            client.post("domain.delete", {"domainId": ex["domainId"]})
+
+    return result_state
+
+
+def reconcile_app_domains(
+    client: "DokployClient",
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+) -> None:
+    """Reconcile domains for all apps on redeploy."""
+    changed = False
+    for app_def in cfg.get("apps", []):
+        domain_cfg = app_def.get("domain")
+        name = app_def["name"]
+        if domain_cfg is None and "domains" not in state["apps"].get(name, {}):
+            continue
+        compose = is_compose(app_def)
+        if compose:
+            resource_id = state["apps"][name]["composeId"]
+            existing = client.get("domain.byComposeId", {"composeId": resource_id})
+        else:
+            resource_id = state["apps"][name]["applicationId"]
+            existing = client.get("domain.byApplicationId", {"applicationId": resource_id})
+        if not isinstance(existing, list):
+            existing = []
+        desired = domain_cfg if isinstance(domain_cfg, list) else [domain_cfg] if domain_cfg else []
+        new_state = reconcile_domains(client, resource_id, existing, desired, compose=compose)
+        state["apps"][name]["domains"] = new_state
+        changed = True
+    if changed:
+        save_state(state, state_file)
+
+
 class DokployClient:
     """Thin httpx wrapper for Dokploy API."""
 
@@ -945,6 +1017,7 @@ def cmd_apply(
 
     if is_redeploy:
         cleanup_stale_routes(load_state(state_file), cfg)
+        reconcile_app_domains(client, cfg, load_state(state_file), state_file)
         reconcile_app_schedules(client, cfg, load_state(state_file), state_file)
 
     print("\n==> Phase 4/4: trigger")
@@ -1174,6 +1247,66 @@ def _plan_redeploy(
                     "attrs": {"added": added, "removed": removed},
                 }
             )
+
+        domain_cfg = app_def.get("domain")
+        if domain_cfg is not None or "domains" in state["apps"].get(name, {}):
+            if compose:
+                remote_domains = client.get("domain.byComposeId", {"composeId": app_info["composeId"]})
+            else:
+                remote_domains = client.get("domain.byApplicationId", {"applicationId": app_info["applicationId"]})
+            if not isinstance(remote_domains, list):
+                remote_domains = []
+
+            desired_domains = domain_cfg if isinstance(domain_cfg, list) else [domain_cfg] if domain_cfg else []
+            existing_by_host = {d["host"]: d for d in remote_domains}
+            desired_by_host = {d["host"]: d for d in desired_domains}
+
+            for host, dom in desired_by_host.items():
+                if host in existing_by_host:
+                    ex = existing_by_host[host]
+                    diffs: dict = {}
+                    for key in ("port", "https", "certificateType", "path", "internalPath", "stripPath"):
+                        old_val = ex.get(key)
+                        new_val = dom.get(key)
+                        if old_val != new_val:
+                            diffs[key] = (old_val, new_val)
+                    if diffs:
+                        changes.append(
+                            {
+                                "action": "update",
+                                "resource_type": "domain",
+                                "name": host,
+                                "parent": name,
+                                "attrs": diffs,
+                            }
+                        )
+                else:
+                    changes.append(
+                        {
+                            "action": "create",
+                            "resource_type": "domain",
+                            "name": host,
+                            "parent": name,
+                            "attrs": {
+                                "host": host,
+                                "port": dom.get("port"),
+                                "https": dom.get("https", False),
+                                "certificateType": dom.get("certificateType", "none"),
+                            },
+                        }
+                    )
+
+            for host in existing_by_host:
+                if host not in desired_by_host:
+                    changes.append(
+                        {
+                            "action": "destroy",
+                            "resource_type": "domain",
+                            "name": host,
+                            "parent": name,
+                            "attrs": {"host": host},
+                        }
+                    )
 
         if compose or app_def is None:
             continue

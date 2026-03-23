@@ -2290,3 +2290,220 @@ class TestCmdPlan:
 
         captured = capsys.readouterr()
         assert "create" in captured.out.lower()
+
+
+class TestDomainReconciliation:
+    def test_reconcile_creates_new_deletes_removed_updates_existing(self):
+        """reconcile_domains creates new, updates changed, deletes removed."""
+        existing = [
+            {
+                "domainId": "d1",
+                "host": "keep.example.com",
+                "port": 3000,
+                "https": True,
+                "certificateType": "letsencrypt",
+            },
+            {
+                "domainId": "d2",
+                "host": "remove.example.com",
+                "port": 8080,
+                "https": False,
+                "certificateType": "none",
+            },
+        ]
+        desired = [
+            {
+                "host": "keep.example.com",
+                "port": 4000,
+                "https": True,
+                "certificateType": "letsencrypt",
+            },
+            {
+                "host": "add.example.com",
+                "port": 9090,
+                "https": True,
+                "certificateType": "letsencrypt",
+            },
+        ]
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "domain.create": {"domainId": "d3"},
+        }.get(endpoint, {})
+
+        result = dokploy.reconcile_domains(client, "app-1", existing, desired, compose=False)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.update"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["domainId"] == "d1"
+        assert update_calls[0][0][1]["port"] == 4000
+
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.delete"]
+        assert len(delete_calls) == 1
+        assert delete_calls[0][0][1]["domainId"] == "d2"
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["host"] == "add.example.com"
+
+        assert "keep.example.com" in result
+        assert result["keep.example.com"]["domainId"] == "d1"
+        assert "add.example.com" in result
+        assert result["add.example.com"]["domainId"] == "d3"
+        assert "remove.example.com" not in result
+
+    def test_reconcile_no_changes(self):
+        """reconcile_domains does nothing when desired matches existing."""
+        existing = [
+            {
+                "domainId": "d1",
+                "host": "app.example.com",
+                "port": 3000,
+                "https": True,
+                "certificateType": "letsencrypt",
+            },
+        ]
+        desired = [
+            {
+                "host": "app.example.com",
+                "port": 3000,
+                "https": True,
+                "certificateType": "letsencrypt",
+            },
+        ]
+        client = MagicMock()
+        dokploy.reconcile_domains(client, "app-1", existing, desired, compose=False)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.update"]
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.delete"]
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.create"]
+        assert len(update_calls) == 0
+        assert len(delete_calls) == 0
+        assert len(create_calls) == 0
+
+    def test_reconcile_all_removed(self):
+        """reconcile_domains deletes all when desired is empty."""
+        existing = [
+            {
+                "domainId": "d1",
+                "host": "app.example.com",
+                "port": 3000,
+                "https": True,
+                "certificateType": "letsencrypt",
+            },
+        ]
+        client = MagicMock()
+        result = dokploy.reconcile_domains(client, "app-1", existing, [], compose=False)
+
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.delete"]
+        assert len(delete_calls) == 1
+        assert delete_calls[0][0][1]["domainId"] == "d1"
+        assert result == {}
+
+    def test_reconcile_compose_domain(self):
+        """reconcile_domains passes compose=True through to build_domain_payload."""
+        existing = []
+        desired = [
+            {
+                "host": "compose.example.com",
+                "port": 3000,
+                "https": True,
+                "certificateType": "letsencrypt",
+                "serviceName": "web",
+            },
+        ]
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "domain.create": {"domainId": "d1"},
+        }.get(endpoint, {})
+
+        result = dokploy.reconcile_domains(client, "comp-1", existing, desired, compose=True)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "domain.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["composeId"] == "comp-1"
+        assert create_calls[0][0][1]["serviceName"] == "web"
+        assert result["compose.example.com"]["domainId"] == "d1"
+
+
+class TestPlanDomainChanges:
+    def test_plan_redeploy_shows_domain_changes(self, tmp_path):
+        """_plan_redeploy detects domain additions, removals, and updates."""
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                },
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": {"type": "docker", "image": "nginx"},
+                    "domain": [
+                        {
+                            "host": "new.example.com",
+                            "port": 3000,
+                            "https": True,
+                            "certificateType": "letsencrypt",
+                        },
+                        {
+                            "host": "kept.example.com",
+                            "port": 4000,
+                            "https": True,
+                            "certificateType": "letsencrypt",
+                        },
+                    ],
+                },
+            ],
+        }
+        remote_domains = [
+            {
+                "domainId": "d1",
+                "host": "removed.example.com",
+                "port": 8080,
+                "https": False,
+                "certificateType": "none",
+            },
+            {
+                "domainId": "d2",
+                "host": "kept.example.com",
+                "port": 3000,
+                "https": True,
+                "certificateType": "letsencrypt",
+            },
+        ]
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "application.one":
+                return {"env": ""}
+            if endpoint == "domain.byApplicationId":
+                return remote_domains
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        domain_changes = [c for c in changes if c["resource_type"] == "domain"]
+        actions = {c["action"] for c in domain_changes}
+        assert "create" in actions
+        assert "destroy" in actions
+        assert "update" in actions
+
+        created = [c for c in domain_changes if c["action"] == "create"]
+        assert len(created) == 1
+        assert created[0]["name"] == "new.example.com"
+
+        destroyed = [c for c in domain_changes if c["action"] == "destroy"]
+        assert len(destroyed) == 1
+        assert destroyed[0]["name"] == "removed.example.com"
+
+        updated = [c for c in domain_changes if c["action"] == "update"]
+        assert len(updated) == 1
+        assert updated[0]["name"] == "kept.example.com"
