@@ -167,20 +167,43 @@ Resolution happens during `setup` (for commands) and `env` (for environment vari
 
 ## Environment Variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `DOKPLOY_URL` | yes | — | Dokploy server URL |
-| `DOKPLOY_API_KEY` | yes | — | API key for authentication |
-| `DOKPLOY_ENV` | no | `dev` | Target environment (alternative to `--env` flag) |
-| `ENV_EXCLUDES` | no | — | Extra env var exclusion patterns when pushing `.env` (see below) |
-| `ENV_EXCLUDE_PREFIXES` | no | — | Legacy alias for `ENV_EXCLUDES` |
-| `DOKPLOY_SSH_HOST` | for logs/exec | — | SSH host for Docker access (IP or hostname) |
-| `DOKPLOY_SSH_USER` | no | `root` | SSH user for Docker access |
-| `DOKPLOY_SSH_PORT` | no | `22` | SSH port for Docker access |
+| Variable               | Required      | Default | Description                                                      |
+| ---------------------- | ------------- | ------- | ---------------------------------------------------------------- |
+| `DOKPLOY_URL`          | yes           | —       | Dokploy server URL                                               |
+| `DOKPLOY_API_KEY`      | yes           | —       | API key for authentication                                       |
+| `DOKPLOY_ENV`          | no            | `dev`   | Target environment (alternative to `--env` flag)                 |
+| `DOTENV_FILE`          | no            | `.env`  | Path to `.env` file for config and push (see below)              |
+| `ENV_EXCLUDES`         | no            | —       | Extra env var exclusion patterns when pushing `.env` (see below) |
+| `ENV_EXCLUDE_PREFIXES` | no            | —       | Legacy alias for `ENV_EXCLUDES`                                  |
+| `DOKPLOY_SSH_HOST`     | for logs/exec | —       | SSH host for Docker access (IP or hostname)                      |
+| `DOKPLOY_SSH_USER`     | no            | `root`  | SSH user for Docker access                                       |
+| `DOKPLOY_SSH_PORT`     | no            | `22`    | SSH port for Docker access                                       |
 
 Resolution order: `--env` flag > `DOKPLOY_ENV` (from `.env` or environment) > `dev`.
 
 The `DOKPLOY_SSH_*` variables are only required for the `logs` and `exec` commands, which connect to the Docker daemon on the Dokploy host via SSH.
+
+### Env File Selection
+
+By default, `ic env` reads `.env` from the repo root. You can override this with:
+
+- **`--env-file <path>`** CLI flag (highest priority)
+- **`DOTENV_FILE`** environment variable (follows the [python-decouple convention](https://github.com/HBNetwork/python-decouple#how-do-i-use-it-with-django))
+
+```bash
+ic --env prod --env-file .env.prod env     # explicit file path
+DOTENV_FILE=.env.prod ic --env prod env    # via env var
+```
+
+### Process Environment Override
+
+When pushing env vars, `ic env` resolves each value through python-decouple's `Config`, which checks `os.environ` before the `.env` file. This means process environment variables automatically override file values for matching keys:
+
+```bash
+doppler run -- ic --env prod env    # Doppler secrets override .env values
+```
+
+Only keys present in the `.env` file are pushed — stray process env vars (like `PATH` or `HOME`) are never included.
 
 ### Env Exclusion Patterns
 

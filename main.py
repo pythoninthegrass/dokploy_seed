@@ -33,6 +33,7 @@ import copy
 import docker
 import httpx
 import json
+import os
 import paramiko
 import re
 import sys
@@ -42,8 +43,12 @@ from pathlib import Path
 
 
 def _build_config() -> Config:
-    """Build a decouple Config that reads .env from the current working directory."""
-    env_file = Path.cwd() / ".env"
+    """Build a decouple Config from the resolved .env path.
+
+    Honors the ``DOTENV_FILE`` environment variable to override the default
+    path, following the python-decouple convention.
+    """
+    env_file = Path(os.environ.get("DOTENV_FILE", str(Path.cwd() / ".env")))
     if env_file.is_file():
         return Config(RepositoryEnv(str(env_file)))
     return Config(RepositoryEmpty())
@@ -203,6 +208,22 @@ def filter_env(content: str, exclude_patterns: list[str]) -> str:
         if _is_env_excluded(key, exclude_patterns):
             continue
         lines.append(line)
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+def resolve_env_for_push(env_file: Path, exclude_patterns: list[str]) -> str:
+    """Read env file and resolve values, preferring os.environ over file values.
+
+    Uses python-decouple's Config resolution (os.environ > file > default)
+    so that ``doppler run -- ic env`` injects secrets without modifying the file.
+    """
+    repo = RepositoryEnv(str(env_file))
+    push_config = Config(repo)
+    lines = []
+    for key in repo.data:
+        if _is_env_excluded(key, exclude_patterns):
+            continue
+        lines.append(f"{key}={push_config(key)}")
     return "\n".join(lines) + "\n" if lines else ""
 
 
@@ -784,23 +805,27 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
         print(f"  {name}: {rid}")
 
 
-def cmd_env(client: DokployClient, cfg: dict, state_file: Path, repo_root: Path) -> None:
+def cmd_env(
+    client: DokployClient,
+    cfg: dict,
+    state_file: Path,
+    repo_root: Path,
+    env_file_override: Path | None = None,
+) -> None:
     state = load_state(state_file)
     env_targets = cfg["project"].get("env_targets", [])
-    env_file = repo_root / ".env"
+    env_file = env_file_override or Path(os.environ.get("DOTENV_FILE", str(repo_root / ".env")))
     apps_by_name = {a["name"]: a for a in cfg["apps"]}
 
-    # Read and filter .env for env_targets
     if env_targets:
         if not env_file.exists():
             print(f"ERROR: {env_file} not found.")
             sys.exit(1)
 
-        raw_env = env_file.read_text()
-        exclude_prefixes = get_env_excludes()
-        filtered = filter_env(raw_env, exclude_prefixes)
+        exclude_patterns = get_env_excludes()
+        filtered = resolve_env_for_push(env_file, exclude_patterns)
         total = len(filtered.strip().splitlines()) if filtered.strip() else 0
-        print(f"Filtered .env: {total} vars (from {len(raw_env.splitlines())} lines)")
+        print(f"Filtered .env: {total} vars")
 
         for name in env_targets:
             app_info = state["apps"][name]
@@ -891,7 +916,13 @@ def cmd_trigger(client: DokployClient, cfg: dict, state_file: Path, *, redeploy:
     print("\nAll deploys triggered.")
 
 
-def cmd_apply(repo_root: Path, client: DokployClient, cfg: dict, state_file: Path) -> None:
+def cmd_apply(
+    repo_root: Path,
+    client: DokployClient,
+    cfg: dict,
+    state_file: Path,
+    env_file_override: Path | None = None,
+) -> None:
     print("\n==> Phase 1/4: check")
     cmd_check(repo_root)
 
@@ -910,7 +941,7 @@ def cmd_apply(repo_root: Path, client: DokployClient, cfg: dict, state_file: Pat
         cmd_setup(client, cfg, state_file, repo_root)
 
     print("\n==> Phase 3/4: env")
-    cmd_env(client, cfg, state_file, repo_root)
+    cmd_env(client, cfg, state_file, repo_root, env_file_override=env_file_override)
 
     if is_redeploy:
         cleanup_stale_routes(load_state(state_file), cfg)
@@ -1630,6 +1661,12 @@ def main() -> None:
         default=None,
         help="Target environment (default: DOKPLOY_ENV from .env, or 'dev')",
     )
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        type=Path,
+        help="Path to .env file for push (default: DOTENV_FILE env var, or <repo>/.env)",
+    )
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("check", help="Pre-flight checks")
@@ -1694,9 +1731,9 @@ def main() -> None:
         case "setup":
             cmd_setup(client, cfg, state_file, repo_root)
         case "env":
-            cmd_env(client, cfg, state_file, repo_root)
+            cmd_env(client, cfg, state_file, repo_root, env_file_override=args.env_file)
         case "apply":
-            cmd_apply(repo_root, client, cfg, state_file)
+            cmd_apply(repo_root, client, cfg, state_file, env_file_override=args.env_file)
         case "trigger":
             cmd_trigger(client, cfg, state_file, redeploy=True)
         case "status":

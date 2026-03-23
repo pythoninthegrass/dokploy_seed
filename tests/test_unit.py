@@ -32,6 +32,15 @@ class TestBuildConfig:
         cfg = dokploy._build_config()
         assert cfg("MY_TEST_VAR") == "from_file"
 
+    def test_dotenv_file_env_var_overrides_default_path(self, tmp_path, monkeypatch):
+        """DOTENV_FILE env var makes _build_config read from that file instead."""
+        custom = tmp_path / "custom.env"
+        custom.write_text("CUSTOM_VAR=from_custom\n")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("DOTENV_FILE", str(custom))
+        cfg = dokploy._build_config()
+        assert cfg("CUSTOM_VAR") == "from_custom"
+
 
 class TestFindRepoRoot:
     def test_finds_repo_root(self, tmp_path, monkeypatch):
@@ -253,6 +262,64 @@ class TestFilterEnv:
         result = dokploy.filter_env(content, ["DEV"])
         assert "DEV=True" not in result
         assert "dev=true" in result
+
+
+class TestResolveEnvForPush:
+    def test_file_values_pass_through(self, tmp_path):
+        """Keys from file are returned when no matching env vars are set."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("FOO=bar\nBAZ=qux\n")
+        result = dokploy.resolve_env_for_push(env_file, [])
+        assert "FOO=bar" in result
+        assert "BAZ=qux" in result
+
+    def test_os_environ_wins_over_file(self, tmp_path, monkeypatch):
+        """Process env value overrides file value for the same key."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("FOO=from_file\n")
+        monkeypatch.setenv("FOO", "from_process")
+        result = dokploy.resolve_env_for_push(env_file, [])
+        assert "FOO=from_process" in result
+        assert "from_file" not in result
+
+    def test_excluded_keys_filtered(self, tmp_path):
+        """Excluded keys are not included in output."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("DOKPLOY_KEY=secret\nAPP_URL=http://app\n")
+        result = dokploy.resolve_env_for_push(env_file, ["DOKPLOY_"])
+        assert "DOKPLOY_KEY" not in result
+        assert "APP_URL=http://app" in result
+
+    def test_stray_env_vars_not_added(self, tmp_path, monkeypatch):
+        """Keys in os.environ but not in the file are not added to output."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("FOO=bar\n")
+        monkeypatch.setenv("STRAY_VAR", "should_not_appear")
+        result = dokploy.resolve_env_for_push(env_file, [])
+        assert "STRAY_VAR" not in result
+
+    def test_value_with_equals_sign(self, tmp_path, monkeypatch):
+        """Values containing '=' are handled correctly via os.environ override."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("DB_URL=old\n")
+        monkeypatch.setenv("DB_URL", "postgres://u:p@h/db?opt=1")
+        result = dokploy.resolve_env_for_push(env_file, [])
+        assert "DB_URL=postgres://u:p@h/db?opt=1" in result
+
+    def test_empty_file_returns_empty(self, tmp_path):
+        """An empty .env file produces an empty string."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("")
+        result = dokploy.resolve_env_for_push(env_file, [])
+        assert result == ""
+
+    def test_comments_and_blanks_skipped(self, tmp_path):
+        """Comments and blank lines in the file are not included."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("# comment\n\nFOO=bar\n")
+        result = dokploy.resolve_env_for_push(env_file, [])
+        assert "# comment" not in result
+        assert "FOO=bar" in result
 
 
 class TestLoadSaveState:
@@ -666,7 +733,7 @@ class TestUnifiedApply:
 
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: calls.append("check"))
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: calls.append("setup"))
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: calls.append("env"))
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
 
         dokploy.cmd_apply(
@@ -687,7 +754,7 @@ class TestUnifiedApply:
 
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: calls.append("check"))
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: calls.append("setup"))
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: calls.append("env"))
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
         monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
 
@@ -710,7 +777,7 @@ class TestUnifiedApply:
 
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
         monkeypatch.setattr(
             dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
         )
@@ -732,7 +799,7 @@ class TestUnifiedApply:
 
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
         monkeypatch.setattr(
             dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: trigger_kwargs.update(redeploy=redeploy)
         )
@@ -752,7 +819,7 @@ class TestUnifiedApply:
 
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
 
         dokploy.cmd_apply(
@@ -779,7 +846,7 @@ class TestUnifiedApply:
 
         monkeypatch.setattr(dokploy, "cmd_check", failing_check)
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: calls.append("setup"))
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: calls.append("env"))
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: calls.append("env"))
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: calls.append("trigger"))
 
         with pytest.raises(SystemExit):
@@ -876,7 +943,7 @@ class TestCleanupStaleRoutes:
         state_file.write_text("{}")
 
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
         monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
         monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
@@ -897,7 +964,7 @@ class TestCleanupStaleRoutes:
 
         monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
         monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
-        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
         monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
         monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: calls.append("cleanup"))
 
