@@ -80,6 +80,30 @@ See [docs/testing.md](docs/testing.md) for fixture architecture, markers, covera
 
 - **ruff** for Python (line length 88, 4-space indent)
 - **markdownlint** for Markdown (config in `.markdownlint.jsonc`)
+- **yamllint** for YAML (config in `.yamllint`)
+
+Tools managed by mise (prek, python, uv, yamllint, etc.) must be invoked via `mise exec --`:
+
+```bash
+mise exec -- yamllint -c .yamllint .
+```
+
+### Markdown Tables
+
+markdownlint enforces aligned table columns (MD060). When writing markdown tables, generate them programmatically to guarantee pipe alignment:
+
+```python
+rows = [["Header1", "Header2"], ["cell", "cell"]]
+widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
+def fmt(row):
+    return "| " + " | ".join(c.ljust(w) for c, w in zip(row, widths)) + " |"
+print(fmt(rows[0]))
+print("| " + " | ".join("-" * w for w in widths) + " |")
+for row in rows[1:]:
+    print(fmt(row))
+```
+
+Do NOT hand-align tables — column math is error-prone and markdownlint rejects even single-character misalignment.
 
 ## When Modifying
 
@@ -176,7 +200,7 @@ This project uses Backlog.md MCP for all task and project management.
 | `task_view`     | View full task details                                                           |
 | `task_search`   | Find tasks by keyword                                                            |
 | `task_list`     | List tasks with optional filters                                                 |
-| `task_complete` | **Moves task to `backlog/completed/`** — only use for cleanup, not marking done |
+| `task_complete` | **Moves task to `backlog/completed/`** — only use for cleanup, not marking done  |
 
 ### Task Lifecycle
 

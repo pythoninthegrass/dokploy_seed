@@ -1,10 +1,10 @@
 ---
 id: TASK-009
 title: Monitor Dokploy upstream releases via GitHub Actions
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-03-07 06:46'
-updated_date: '2026-03-07 06:48'
+updated_date: '2026-03-23 15:58'
 labels:
   - ci
   - automation
@@ -12,6 +12,7 @@ dependencies: []
 references:
   - scripts/fetch_openapi.sh
   - schemas/src/
+  - .github/workflows/monitor-dokploy.yml
 priority: medium
 ---
 
@@ -31,9 +32,15 @@ Add a GitHub Actions workflow that watches for new Dokploy releases and automati
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 GHA workflow triggers on new Dokploy releases (event-based)
-- [ ] #2 Workflow runs `scripts/fetch_openapi.sh <tag>` and commits the new spec to `schemas/src/`
-- [ ] #3 Workflow opens a `icarus` issue with the release tag, changelog link, and a checklist for validating breaking changes
-- [ ] #4 Workflow is idempotent — re-running for an already-fetched version is a no-op
-- [ ] #5 README or docs updated with workflow description
+- [x] #1 GHA workflow triggers on new Dokploy releases (event-based)
+- [x] #2 Workflow runs `scripts/fetch_openapi.sh <tag>` and commits the new spec to `schemas/src/`
+- [x] #3 Workflow opens a `icarus` issue with the release tag, changelog link, and a checklist for validating breaking changes
+- [x] #4 Workflow is idempotent — re-running for an already-fetched version is a no-op
+- [x] #5 README or docs updated with workflow description
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added `.github/workflows/monitor-dokploy.yml` — a daily cron workflow (8 AM UTC) that:\n1. Resolves the latest Dokploy release tag via `gh api`\n2. Checks if the OpenAPI spec already exists in `schemas/src/` (idempotent)\n3. Runs `scripts/fetch_openapi.sh <tag>` to fetch the spec\n4. Commits the new spec file\n5. Opens a tracking issue with changelog link and validation checklist\n\nAlso supports `workflow_dispatch` with an optional tag input for manual runs.\n\nUpdated README.md with a CI Workflows section documenting all three workflows."
+<!-- SECTION:FINAL_SUMMARY:END -->

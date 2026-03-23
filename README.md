@@ -23,6 +23,7 @@ Deployment tool for [Dokploy](https://dokploy.com). Define your project's apps, 
   * [State Files](#state-files)
   * [Examples](#examples)
   * [Adding to an Existing Project](#adding-to-an-existing-project)
+  * [CI Workflows](#ci-workflows)
   * [API Notes](#api-notes)
   * [Contributing](#contributing)
   * [Security](#security)
@@ -229,6 +230,16 @@ ruff check .
 # Format
 ruff format .
 ```
+
+## CI Workflows
+
+| Workflow                                                 | Trigger                   | Description                                                                           |
+| -------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------- |
+| [E2E Tests](.github/workflows/e2e.yml)                   | Push/PR to `main`         | Runs end-to-end test suite against a live Dokploy instance                            |
+| [Release Please](.github/workflows/release-please.yml)   | Push to `main`            | Automates version bumps and changelog generation                                      |
+| [Monitor Dokploy](.github/workflows/monitor-dokploy.yml) | Daily (8 AM UTC) / manual | Checks for new Dokploy releases, fetches the OpenAPI spec, and opens a tracking issue |
+
+The monitor workflow can also be triggered manually via `workflow_dispatch` with an optional tag input (e.g., `v0.28.8`). If the spec for a given version already exists in `schemas/src/`, the run is a no-op.
 
 ## API Notes
 

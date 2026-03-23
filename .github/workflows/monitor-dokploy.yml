@@ -1,0 +1,89 @@
+name: Monitor Dokploy Releases
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Specific release tag (e.g., v0.28.8). Leave empty for latest."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  check-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG=$(gh api repos/Dokploy/dokploy/releases/latest --jq '.tag_name')
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if spec already exists
+        id: check
+        run: |
+          FILE="schemas/src/openapi_${{ steps.release.outputs.version }}.json"
+          if [ -f "$FILE" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Spec already exists: $FILE"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "New spec needed: $FILE"
+          fi
+
+      - name: Fetch OpenAPI spec
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/fetch_openapi.sh "${{ steps.release.outputs.tag }}"
+
+      - name: Commit new spec
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "schemas/src/openapi_${{ steps.release.outputs.version }}.json"
+          git commit -m "chore: add OpenAPI spec for Dokploy ${{ steps.release.outputs.tag }}"
+          git push
+
+      - name: Open tracking issue
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          gh issue create \
+            --title "Dokploy ${TAG} released — validate OpenAPI changes" \
+            --label "upstream" \
+            --body "$(cat <<EOF
+          ## Dokploy ${TAG} Released
+
+          The [monitor-dokploy](.github/workflows/monitor-dokploy.yml) workflow detected a new release and committed the updated OpenAPI spec.
+
+          **Release**: https://github.com/Dokploy/dokploy/releases/tag/${TAG}
+          **Spec**: \`schemas/src/openapi_${TAG#v}.json\`
+
+          ### Validation checklist
+
+          - [ ] Review changelog for breaking API changes
+          - [ ] Diff new spec against previous version: \`diff schemas/src/openapi_<prev>.json schemas/src/openapi_${TAG#v}.json\`
+          - [ ] Verify icarus commands still work against the new API
+          - [ ] Update \`docs/api-notes.md\` if endpoints changed
+          - [ ] Update schema references in \`dokploy.yml.example\` if needed
+          EOF
+          )"
