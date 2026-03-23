@@ -33,9 +33,11 @@ tasks:
   lock:
     desc: "Update the project's lockfile"
     summary: |
-      If the project lockfile (uv.lock) does not exist, it will be created. If a lockfile is present, its contents will be used as preferences for the resolution.
+      If the project lockfile (uv.lock) does not exist, it will be created.
+      If a lockfile is present, its contents will be used as preferences for the resolution.
 
-      If there are no changes to the project's dependencies, locking will have no effect unless the --upgrade flag is provided.
+      If there are no changes to the project's dependencies, locking will have no effect
+      unless the --upgrade flag is provided.
     cmds:
       - uv lock
     dir: "{{.ROOT_DIR}}"

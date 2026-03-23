@@ -91,7 +91,7 @@ tasks:
     deps: [e2e:snapshot]
     cmds:
       - task: e2e:setup
-      - defer: { task: e2e:teardown }
+      - defer: {task: e2e:teardown}
       - task: e2e
 
   e2e:snapshot:

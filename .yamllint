@@ -1,0 +1,17 @@
+---
+extends: default
+
+ignore:
+  - .venv/
+  - .serena/
+  - .github/
+
+rules:
+  document-start: disable
+  line-length:
+    max: 150
+  indentation:
+    spaces: 2
+    indent-sequences: true
+  truthy:
+    check-keys: false
