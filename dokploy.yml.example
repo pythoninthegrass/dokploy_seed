@@ -52,6 +52,11 @@ apps:
       - source: redis_data
         target: /data
         type: volume
+    ports:
+      - publishedPort: 6379
+        targetPort: 6379
+        # protocol: tcp           # tcp (default) | udp
+        # publishMode: ingress    # ingress (default) | host
 
   - name: web
     source: github

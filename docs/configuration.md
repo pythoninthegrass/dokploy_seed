@@ -45,7 +45,7 @@ Per-environment overrides merged into the base config before any command runs.
 
 ### Overridable App Properties
 
-All per-app fields can be overridden per environment: `command`, `env`, `dockerImage`, `domain`, `buildType`, `dockerfile`, `dockerContextPath`, `dockerBuildStage`, `publishDirectory`, `autoDeploy`, `replicas`, `buildPath`, `triggerType`, `watchPaths`, `create_env_file`, `schedules`.
+All per-app fields can be overridden per environment: `command`, `env`, `dockerImage`, `domain`, `buildType`, `dockerfile`, `dockerContextPath`, `dockerBuildStage`, `publishDirectory`, `autoDeploy`, `replicas`, `buildPath`, `triggerType`, `watchPaths`, `create_env_file`, `ports`, `schedules`.
 
 ### Merging Semantics
 
@@ -76,6 +76,7 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | `apps[].watchPaths` | no | File paths to watch for auto-deploy triggers (list of strings) |
 | `apps[].create_env_file` | no | Write env vars to a `.env` file in the container working directory (default: `false`) |
 | `apps[].volumes` | no | List of volume mount objects for persistent storage |
+| `apps[].ports` | no | List of port mapping objects for TCP/UDP port exposure |
 | `apps[].schedules` | no | List of cron job objects that run commands inside the app container |
 | `apps[].composeFile` | if compose | Compose file — inline YAML block scalar (`\|`) or relative file path (e.g. `docker-compose.yml`) resolved from `dokploy.yml` location |
 | `apps[].composeType` | no | Compose type: `docker-compose` (default) or `stack` |
@@ -87,6 +88,17 @@ All per-app fields can be overridden per environment: `command`, `env`, `dockerI
 | `volume.source` | yes | Volume name (for `type: volume`) or host path (for `type: bind`) |
 | `volume.target` | yes | Mount path inside the container |
 | `volume.type` | yes | `volume` (Docker-managed) or `bind` (host path) |
+
+### Port Object
+
+| Key                | Required | Description                                   |
+|--------------------|----------|-----------------------------------------------|
+| `port.publishedPort` | yes      | Host port to publish                          |
+| `port.targetPort`  | yes      | Container port to map to                      |
+| `port.protocol`    | no       | `tcp` (default) or `udp`                      |
+| `port.publishMode` | no       | `ingress` (default) or `host` (Swarm publish) |
+
+On first `setup`, ports are created via the Dokploy `port.create` API. On subsequent `apply` (redeploy), ports are reconciled by `publishedPort`: existing ports are updated, new ones are created, and removed ones are deleted.
 
 ### Schedule Object
 

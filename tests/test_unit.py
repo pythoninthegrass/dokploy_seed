@@ -2907,3 +2907,340 @@ class TestCmdApplyCallsReconcileMounts:
         )
 
         assert "reconcile_app_mounts" not in calls
+
+
+class TestBuildPortPayload:
+    def test_minimal_port(self):
+        """build_port_payload with only required fields."""
+        result = dokploy.build_port_payload("app-1", {
+            "publishedPort": 8080,
+            "targetPort": 80,
+        })
+        assert result == {
+            "applicationId": "app-1",
+            "publishedPort": 8080,
+            "targetPort": 80,
+            "protocol": "tcp",
+            "publishMode": "ingress",
+        }
+
+    def test_full_port(self):
+        """build_port_payload with all fields."""
+        result = dokploy.build_port_payload("app-1", {
+            "publishedPort": 5432,
+            "targetPort": 5432,
+            "protocol": "udp",
+            "publishMode": "host",
+        })
+        assert result == {
+            "applicationId": "app-1",
+            "publishedPort": 5432,
+            "targetPort": 5432,
+            "protocol": "udp",
+            "publishMode": "host",
+        }
+
+
+class TestReconcilePorts:
+    def test_reconcile_creates_new_deletes_removed_updates_existing(self):
+        """reconcile_ports creates new, updates changed, deletes removed."""
+        existing = [
+            {
+                "portId": "p1",
+                "publishedPort": 8080,
+                "targetPort": 80,
+                "protocol": "tcp",
+                "publishMode": "ingress",
+            },
+            {
+                "portId": "p2",
+                "publishedPort": 5432,
+                "targetPort": 5432,
+                "protocol": "tcp",
+                "publishMode": "ingress",
+            },
+        ]
+        desired = [
+            {"publishedPort": 8080, "targetPort": 8000, "protocol": "tcp", "publishMode": "ingress"},
+            {"publishedPort": 9090, "targetPort": 90, "protocol": "udp", "publishMode": "host"},
+        ]
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "port.create": {"portId": "p3"},
+        }.get(endpoint, {})
+
+        result = dokploy.reconcile_ports(client, "app-1", existing, desired)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "port.update"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["portId"] == "p1"
+        assert update_calls[0][0][1]["targetPort"] == 8000
+
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "port.delete"]
+        assert len(delete_calls) == 1
+        assert delete_calls[0][0][1]["portId"] == "p2"
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "port.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["publishedPort"] == 9090
+
+        assert 8080 in result
+        assert result[8080]["portId"] == "p1"
+        assert 9090 in result
+        assert result[9090]["portId"] == "p3"
+        assert 5432 not in result
+
+    def test_reconcile_no_changes(self):
+        """reconcile_ports does nothing when desired matches existing."""
+        existing = [
+            {
+                "portId": "p1",
+                "publishedPort": 8080,
+                "targetPort": 80,
+                "protocol": "tcp",
+                "publishMode": "ingress",
+            },
+        ]
+        desired = [
+            {"publishedPort": 8080, "targetPort": 80, "protocol": "tcp", "publishMode": "ingress"},
+        ]
+        client = MagicMock()
+        dokploy.reconcile_ports(client, "app-1", existing, desired)
+
+        assert len(client.post.call_args_list) == 0
+
+    def test_reconcile_all_removed(self):
+        """reconcile_ports deletes all when desired is empty."""
+        existing = [
+            {
+                "portId": "p1",
+                "publishedPort": 8080,
+                "targetPort": 80,
+                "protocol": "tcp",
+                "publishMode": "ingress",
+            },
+        ]
+        client = MagicMock()
+        result = dokploy.reconcile_ports(client, "app-1", existing, [])
+
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "port.delete"]
+        assert len(delete_calls) == 1
+        assert delete_calls[0][0][1]["portId"] == "p1"
+        assert result == {}
+
+
+class TestReconcileAppPorts:
+    def test_fetches_ports_from_application_one(self, tmp_path):
+        """reconcile_app_ports reads ports from application.one."""
+        state_file = tmp_path / "state.json"
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {"applicationId": "app-1"},
+            },
+        }
+        import json
+
+        state_file.write_text(json.dumps(state))
+
+        cfg = {
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "ports": [
+                        {"publishedPort": 8080, "targetPort": 80},
+                    ],
+                },
+            ],
+        }
+        client = MagicMock()
+        client.get.return_value = {"ports": []}
+        client.post.side_effect = lambda endpoint, payload: {"portId": "p1"}
+
+        dokploy.reconcile_app_ports(client, cfg, state, state_file)
+
+        client.get.assert_called_once_with(
+            "application.one", {"applicationId": "app-1"}
+        )
+
+    def test_skips_compose_apps(self, tmp_path):
+        """reconcile_app_ports skips compose apps."""
+        state_file = tmp_path / "state.json"
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "stack": {"composeId": "c-1", "source": "compose"},
+            },
+        }
+        import json
+
+        state_file.write_text(json.dumps(state))
+
+        cfg = {
+            "apps": [
+                {
+                    "name": "stack",
+                    "source": "compose",
+                    "composePath": "./docker-compose.yml",
+                },
+            ],
+        }
+        client = MagicMock()
+        dokploy.reconcile_app_ports(client, cfg, state, state_file)
+
+        client.get.assert_not_called()
+
+
+class TestPlanPortChanges:
+    def test_plan_redeploy_shows_port_changes(self, tmp_path):
+        """_plan_redeploy detects port additions, removals, and updates."""
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                },
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": {"type": "docker", "image": "nginx"},
+                    "ports": [
+                        {"publishedPort": 8080, "targetPort": 8000},
+                        {"publishedPort": 9090, "targetPort": 90, "protocol": "udp", "publishMode": "host"},
+                    ],
+                },
+            ],
+        }
+        remote_ports = [
+            {
+                "portId": "p1",
+                "publishedPort": 8080,
+                "targetPort": 80,
+                "protocol": "tcp",
+                "publishMode": "ingress",
+            },
+            {
+                "portId": "p2",
+                "publishedPort": 5432,
+                "targetPort": 5432,
+                "protocol": "tcp",
+                "publishMode": "ingress",
+            },
+        ]
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "application.one":
+                return {"env": "", "ports": remote_ports}
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        port_changes = [c for c in changes if c["resource_type"] == "port"]
+        actions = {c["action"] for c in port_changes}
+        assert "create" in actions
+        assert "destroy" in actions
+        assert "update" in actions
+
+        created = [c for c in port_changes if c["action"] == "create"]
+        assert len(created) == 1
+        assert created[0]["attrs"]["publishedPort"] == 9090
+
+        destroyed = [c for c in port_changes if c["action"] == "destroy"]
+        assert len(destroyed) == 1
+        assert destroyed[0]["attrs"]["publishedPort"] == 5432
+
+        updated = [c for c in port_changes if c["action"] == "update"]
+        assert len(updated) == 1
+        assert "targetPort" in updated[0]["attrs"]
+
+    def test_plan_initial_setup_shows_ports(self, tmp_path):
+        """_plan_initial_setup includes port creation."""
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "ports": [
+                        {"publishedPort": 8080, "targetPort": 80},
+                    ],
+                },
+            ],
+        }
+        changes = []
+        dokploy._plan_initial_setup(cfg, tmp_path, changes)
+
+        port_changes = [c for c in changes if c["resource_type"] == "port"]
+        assert len(port_changes) == 1
+        assert port_changes[0]["action"] == "create"
+        assert port_changes[0]["attrs"]["publishedPort"] == 8080
+        assert port_changes[0]["attrs"]["targetPort"] == 80
+
+
+class TestCmdApplyReconcilePorts:
+    def test_redeploy_calls_reconcile_app_ports(self, tmp_path, monkeypatch):
+        """cmd_apply calls reconcile_app_ports on redeploy."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        import json
+
+        state_file.write_text(json.dumps({"projectId": "proj-1", "apps": {}}))
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: None)
+        monkeypatch.setattr(dokploy, "reconcile_app_domains", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(dokploy, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(dokploy, "reconcile_app_mounts", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(
+            dokploy,
+            "reconcile_app_ports",
+            lambda client, cfg, state, sf: calls.append("reconcile_app_ports"),
+        )
+
+        dokploy.cmd_apply(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "reconcile_app_ports" in calls
+
+    def test_fresh_deploy_does_not_call_reconcile_app_ports(self, tmp_path, monkeypatch):
+        """cmd_apply does NOT call reconcile_app_ports on fresh deploy."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            dokploy,
+            "reconcile_app_ports",
+            lambda client, cfg, state, sf: calls.append("reconcile_app_ports"),
+        )
+
+        dokploy.cmd_apply(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "reconcile_app_ports" not in calls

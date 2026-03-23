@@ -348,6 +348,17 @@ def build_mount_payload(app_id: str, mount: dict) -> dict:
     return payload
 
 
+def build_port_payload(app_id: str, port: dict) -> dict:
+    """Build payload for port.create."""
+    return {
+        "applicationId": app_id,
+        "publishedPort": port["publishedPort"],
+        "targetPort": port["targetPort"],
+        "protocol": port.get("protocol", "tcp"),
+        "publishMode": port.get("publishMode", "ingress"),
+    }
+
+
 def build_schedule_payload(app_id: str, sched: dict) -> dict:
     """Build payload for schedule.create."""
     payload = {
@@ -476,6 +487,74 @@ def reconcile_mounts(
             client.post("mounts.remove", {"mountId": ex["mountId"]})
 
     return result_state
+
+
+def reconcile_ports(
+    client: "DokployClient",
+    app_id: str,
+    existing: list[dict],
+    desired: list[dict],
+) -> dict:
+    """Reconcile ports: update existing by publishedPort, create new, delete removed.
+
+    Returns a dict mapping publishedPort -> {"portId": ...} for state storage.
+    """
+    existing_by_port = {p["publishedPort"]: p for p in existing}
+    desired_by_port = {p["publishedPort"]: p for p in desired}
+
+    result_state = {}
+
+    for pub_port, port in desired_by_port.items():
+        payload = build_port_payload(app_id, port)
+        if pub_port in existing_by_port:
+            ex = existing_by_port[pub_port]
+            port_id = ex["portId"]
+            needs_update = any(payload.get(key) != ex.get(key) for key in ("targetPort", "protocol", "publishMode"))
+            if needs_update:
+                update_payload = {
+                    "portId": port_id,
+                    "publishedPort": payload["publishedPort"],
+                    "targetPort": payload["targetPort"],
+                    "protocol": payload["protocol"],
+                    "publishMode": payload["publishMode"],
+                }
+                client.post("port.update", update_payload)
+            result_state[pub_port] = {"portId": port_id}
+        else:
+            resp = client.post("port.create", payload)
+            result_state[pub_port] = {"portId": resp["portId"]}
+
+    for pub_port, ex in existing_by_port.items():
+        if pub_port not in desired_by_port:
+            client.post("port.delete", {"portId": ex["portId"]})
+
+    return result_state
+
+
+def reconcile_app_ports(
+    client: "DokployClient",
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+) -> None:
+    """Reconcile ports for all apps on redeploy."""
+    changed = False
+    for app_def in cfg.get("apps", []):
+        if is_compose(app_def):
+            continue
+        ports = app_def.get("ports")
+        name = app_def["name"]
+        if ports is None and "ports" not in state["apps"].get(name, {}):
+            continue
+        app_id = state["apps"][name]["applicationId"]
+        remote = client.get("application.one", {"applicationId": app_id})
+        existing = remote.get("ports") or []
+        desired = ports or []
+        new_state = reconcile_ports(client, app_id, existing, desired)
+        state["apps"][name]["ports"] = new_state
+        changed = True
+    if changed:
+        save_state(state, state_file)
 
 
 def reconcile_app_mounts(
@@ -920,7 +999,23 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
             mount_payload = build_mount_payload(app_id, vol)
             client.post("mounts.create", mount_payload)
 
-    # 9. Schedules
+    # 9. Ports
+    for app_def in cfg["apps"]:
+        if is_compose(app_def):
+            continue
+        ports = app_def.get("ports")
+        if not ports:
+            continue
+        name = app_def["name"]
+        app_id = state["apps"][name]["applicationId"]
+        state["apps"][name]["ports"] = {}
+        for port in ports:
+            print(f"Creating port for {name}: {port['publishedPort']} -> {port['targetPort']}...")
+            port_payload = build_port_payload(app_id, port)
+            resp = client.post("port.create", port_payload)
+            state["apps"][name]["ports"][port["publishedPort"]] = {"portId": resp["portId"]}
+
+    # 10. Schedules
     for app_def in cfg["apps"]:
         if is_compose(app_def):
             continue
@@ -936,7 +1031,7 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
             resp = client.post("schedule.create", sched_payload)
             state["apps"][name]["schedules"][sched["name"]] = {"scheduleId": resp["scheduleId"]}
 
-    # 10. Save state
+    # 11. Save state
     save_state(state, state_file)
     print("\nSetup complete!")
     print(f"  Project: {project_id}")
@@ -1088,6 +1183,7 @@ def cmd_apply(
         reconcile_app_domains(client, cfg, load_state(state_file), state_file)
         reconcile_app_schedules(client, cfg, load_state(state_file), state_file)
         reconcile_app_mounts(client, cfg, load_state(state_file), state_file)
+        reconcile_app_ports(client, cfg, load_state(state_file), state_file)
 
     print("\n==> Phase 4/4: trigger")
     cmd_trigger(client, cfg, state_file, redeploy=is_redeploy)
@@ -1204,6 +1300,22 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
                             "type": vol["type"],
                             "source": vol["source"],
                             "target": vol["target"],
+                        },
+                    }
+                )
+
+            for port in app_def.get("ports", []):
+                changes.append(
+                    {
+                        "action": "create",
+                        "resource_type": "port",
+                        "name": f"{port['publishedPort']} -> {port['targetPort']}",
+                        "parent": name,
+                        "attrs": {
+                            "publishedPort": port["publishedPort"],
+                            "targetPort": port["targetPort"],
+                            "protocol": port.get("protocol", "tcp"),
+                            "publishMode": port.get("publishMode", "ingress"),
                         },
                     }
                 )
@@ -1435,6 +1547,63 @@ def _plan_redeploy(
                             "name": f"{ex_source} -> {target}",
                             "parent": name,
                             "attrs": {"mountPath": target},
+                        }
+                    )
+
+        ports_cfg = app_def.get("ports")
+        if ports_cfg is not None or "ports" in state["apps"].get(name, {}):
+            remote_ports = remote.get("ports") or []
+
+            desired_ports = ports_cfg or []
+            existing_by_pub = {p["publishedPort"]: p for p in remote_ports}
+            desired_by_pub = {p["publishedPort"]: p for p in desired_ports}
+
+            for pub_port, port in desired_by_pub.items():
+                payload = build_port_payload(app_info["applicationId"], port)
+                display_name = f"{pub_port} -> {port['targetPort']}"
+                if pub_port in existing_by_pub:
+                    ex = existing_by_pub[pub_port]
+                    diffs: dict = {}
+                    for key in ("targetPort", "protocol", "publishMode"):
+                        old_val = ex.get(key)
+                        new_val = payload.get(key)
+                        if old_val != new_val:
+                            diffs[key] = (old_val, new_val)
+                    if diffs:
+                        changes.append(
+                            {
+                                "action": "update",
+                                "resource_type": "port",
+                                "name": display_name,
+                                "parent": name,
+                                "attrs": diffs,
+                            }
+                        )
+                else:
+                    changes.append(
+                        {
+                            "action": "create",
+                            "resource_type": "port",
+                            "name": display_name,
+                            "parent": name,
+                            "attrs": {
+                                "publishedPort": pub_port,
+                                "targetPort": port.get("targetPort"),
+                                "protocol": port.get("protocol", "tcp"),
+                                "publishMode": port.get("publishMode", "ingress"),
+                            },
+                        }
+                    )
+
+            for pub_port, ex in existing_by_pub.items():
+                if pub_port not in desired_by_pub:
+                    changes.append(
+                        {
+                            "action": "destroy",
+                            "resource_type": "port",
+                            "name": f"{pub_port} -> {ex.get('targetPort', '?')}",
+                            "parent": name,
+                            "attrs": {"publishedPort": pub_port},
                         }
                     )
 

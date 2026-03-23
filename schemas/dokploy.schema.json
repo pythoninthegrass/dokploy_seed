@@ -182,6 +182,13 @@
                   },
                   "description": "File paths to watch for auto-deploy triggers"
                 },
+                "ports": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/port"
+                  },
+                  "description": "TCP/UDP port mappings override"
+                },
                 "schedules": {
                   "type": "array",
                   "items": {
@@ -317,6 +324,13 @@
             },
             "description": "Persistent volume mounts for the application"
           },
+          "ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/port"
+            },
+            "description": "TCP/UDP port mappings to expose beyond domain routing"
+          },
           "schedules": {
             "type": "array",
             "items": {
@@ -365,6 +379,42 @@
             "bind"
           ],
           "description": "Mount type: volume (Docker-managed) or bind (host path)"
+        }
+      }
+    },
+    "port": {
+      "type": "object",
+      "required": [
+        "publishedPort",
+        "targetPort"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "publishedPort": {
+          "type": "integer",
+          "description": "Host port to publish"
+        },
+        "targetPort": {
+          "type": "integer",
+          "description": "Container port to map to"
+        },
+        "protocol": {
+          "type": "string",
+          "enum": [
+            "tcp",
+            "udp"
+          ],
+          "default": "tcp",
+          "description": "Transport protocol (default: tcp)"
+        },
+        "publishMode": {
+          "type": "string",
+          "enum": [
+            "ingress",
+            "host"
+          ],
+          "default": "ingress",
+          "description": "Swarm publish mode (default: ingress)"
         }
       }
     },
