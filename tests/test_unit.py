@@ -3192,6 +3192,449 @@ class TestPlanPortChanges:
         assert port_changes[0]["attrs"]["targetPort"] == 80
 
 
+class TestPlanAppConfigChanges:
+    def test_plan_redeploy_shows_command_change(self, tmp_path):
+        """_plan_redeploy detects command drift between config and server."""
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                },
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "command": "python manage.py runserver",
+                },
+            ],
+        }
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "application.one":
+                return {
+                    "env": "",
+                    "command": "python manage.py migrate",
+                    "mounts": [],
+                    "ports": [],
+                }
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        settings_changes = [c for c in changes if c["resource_type"] == "settings"]
+        assert len(settings_changes) == 1
+        assert settings_changes[0]["action"] == "update"
+        assert "command" in settings_changes[0]["attrs"]
+        assert settings_changes[0]["attrs"]["command"] == (
+            "python manage.py migrate",
+            "python manage.py runserver",
+        )
+
+    def test_plan_redeploy_shows_replicas_change(self, tmp_path):
+        """_plan_redeploy detects replicas drift."""
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                },
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "replicas": 3,
+                },
+            ],
+        }
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "application.one":
+                return {
+                    "env": "",
+                    "replicas": 1,
+                    "mounts": [],
+                    "ports": [],
+                }
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        settings_changes = [c for c in changes if c["resource_type"] == "settings"]
+        assert len(settings_changes) == 1
+        assert settings_changes[0]["attrs"]["replicas"] == (1, 3)
+
+    def test_plan_redeploy_shows_auto_deploy_change(self, tmp_path):
+        """_plan_redeploy detects autoDeploy drift."""
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                },
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "autoDeploy": True,
+                },
+            ],
+        }
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "application.one":
+                return {
+                    "env": "",
+                    "autoDeploy": False,
+                    "mounts": [],
+                    "ports": [],
+                }
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        settings_changes = [c for c in changes if c["resource_type"] == "settings"]
+        assert len(settings_changes) == 1
+        assert settings_changes[0]["attrs"]["autoDeploy"] == (False, True)
+
+    def test_plan_redeploy_no_settings_change_when_matching(self, tmp_path):
+        """_plan_redeploy produces no settings change when remote matches config."""
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                },
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "command": "serve",
+                    "replicas": 2,
+                },
+            ],
+        }
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "application.one":
+                return {
+                    "env": "",
+                    "command": "serve",
+                    "replicas": 2,
+                    "mounts": [],
+                    "ports": [],
+                }
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        settings_changes = [c for c in changes if c["resource_type"] == "settings"]
+        assert len(settings_changes) == 0
+
+    def test_plan_redeploy_skips_compose_app_config(self, tmp_path):
+        """_plan_redeploy does not check app config for compose apps."""
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "composeId": "comp-1",
+                    "source": "compose",
+                },
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "compose",
+                    "composeFile": "docker-compose.yml",
+                },
+            ],
+        }
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "compose.one":
+                return {"env": ""}
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        settings_changes = [c for c in changes if c["resource_type"] == "settings"]
+        assert len(settings_changes) == 0
+
+    def test_plan_redeploy_multiple_config_diffs(self, tmp_path):
+        """_plan_redeploy shows multiple setting fields in one change."""
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                },
+            },
+        }
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "command": "new-cmd",
+                    "replicas": 5,
+                    "autoDeploy": True,
+                },
+            ],
+        }
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "application.one":
+                return {
+                    "env": "",
+                    "command": "old-cmd",
+                    "replicas": 1,
+                    "autoDeploy": False,
+                    "mounts": [],
+                    "ports": [],
+                }
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, cfg, state, tmp_path, changes)
+
+        settings_changes = [c for c in changes if c["resource_type"] == "settings"]
+        assert len(settings_changes) == 1
+        assert len(settings_changes[0]["attrs"]) == 3
+
+
+class TestCmdApplyReconcileAppSettings:
+    def test_redeploy_calls_reconcile_app_settings(self, tmp_path, monkeypatch):
+        """cmd_apply calls reconcile_app_settings on redeploy."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        import json
+
+        state_file.write_text(json.dumps({"projectId": "proj-1", "apps": {}}))
+
+        monkeypatch.setattr(dokploy, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(dokploy, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(dokploy, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(dokploy, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(dokploy, "cleanup_stale_routes", lambda state, cfg: None)
+        monkeypatch.setattr(dokploy, "reconcile_app_domains", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(dokploy, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(dokploy, "reconcile_app_mounts", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(dokploy, "reconcile_app_ports", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(
+            dokploy,
+            "reconcile_app_settings",
+            lambda client, cfg, state: calls.append("reconcile_app_settings"),
+        )
+
+        dokploy.cmd_apply(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "reconcile_app_settings" in calls
+
+
+class TestReconcileAppSettings:
+    def test_updates_command_when_different(self):
+        """reconcile_app_settings updates command when it differs from remote."""
+        client = MagicMock()
+        client.get.return_value = {
+            "command": "old-cmd",
+            "replicas": 1,
+            "autoDeploy": False,
+        }
+
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "command": "new-cmd",
+                },
+            ],
+        }
+        state = {
+            "projectId": "proj-1",
+            "apps": {"web": {"applicationId": "app-1"}},
+        }
+
+        dokploy.reconcile_app_settings(client, cfg, state)
+
+        client.post.assert_called_once()
+        call_args = client.post.call_args
+        assert call_args[0][0] == "application.update"
+        assert call_args[0][1]["command"] == "new-cmd"
+
+    def test_updates_replicas_and_autodeploy(self):
+        """reconcile_app_settings updates replicas and autoDeploy."""
+        client = MagicMock()
+        client.get.return_value = {
+            "replicas": 1,
+            "autoDeploy": False,
+        }
+
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "replicas": 3,
+                    "autoDeploy": True,
+                },
+            ],
+        }
+        state = {
+            "projectId": "proj-1",
+            "apps": {"web": {"applicationId": "app-1"}},
+        }
+
+        dokploy.reconcile_app_settings(client, cfg, state)
+
+        call_args = client.post.call_args
+        assert call_args[0][1]["replicas"] == 3
+        assert call_args[0][1]["autoDeploy"] is True
+
+    def test_no_update_when_matching(self):
+        """reconcile_app_settings does not call update when remote matches."""
+        client = MagicMock()
+        client.get.return_value = {
+            "command": "serve",
+            "replicas": 2,
+            "autoDeploy": True,
+        }
+
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                    "command": "serve",
+                    "replicas": 2,
+                    "autoDeploy": True,
+                },
+            ],
+        }
+        state = {
+            "projectId": "proj-1",
+            "apps": {"web": {"applicationId": "app-1"}},
+        }
+
+        dokploy.reconcile_app_settings(client, cfg, state)
+
+        client.post.assert_not_called()
+
+    def test_skips_compose_apps(self):
+        """reconcile_app_settings skips compose apps."""
+        client = MagicMock()
+
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "compose",
+                    "composeFile": "docker-compose.yml",
+                },
+            ],
+        }
+        state = {
+            "projectId": "proj-1",
+            "apps": {"web": {"composeId": "comp-1", "source": "compose"}},
+        }
+
+        dokploy.reconcile_app_settings(client, cfg, state)
+
+        client.get.assert_not_called()
+        client.post.assert_not_called()
+
+    def test_skips_when_no_settings_in_config(self):
+        """reconcile_app_settings skips apps with no command/replicas/autoDeploy."""
+        client = MagicMock()
+
+        cfg = {
+            "project": {"name": "test", "description": "test"},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx",
+                },
+            ],
+        }
+        state = {
+            "projectId": "proj-1",
+            "apps": {"web": {"applicationId": "app-1"}},
+        }
+
+        dokploy.reconcile_app_settings(client, cfg, state)
+
+        client.get.assert_not_called()
+        client.post.assert_not_called()
+
+
 class TestCmdApplyReconcilePorts:
     def test_redeploy_calls_reconcile_app_ports(self, tmp_path, monkeypatch):
         """cmd_apply calls reconcile_app_ports on redeploy."""

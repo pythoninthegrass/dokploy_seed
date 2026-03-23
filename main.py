@@ -702,6 +702,43 @@ def reconcile_app_domains(
         save_state(state, state_file)
 
 
+def reconcile_app_settings(
+    client: "DokployClient",
+    cfg: dict,
+    state: dict,
+) -> None:
+    """Reconcile app settings (command, replicas, autoDeploy) on redeploy."""
+    for app_def in cfg.get("apps", []):
+        if is_compose(app_def):
+            continue
+        name = app_def["name"]
+        app_id = state["apps"][name]["applicationId"]
+
+        settings_payload = build_app_settings_payload(app_id, app_def)
+        command = app_def.get("command")
+        has_settings = settings_payload is not None or command is not None
+        if not has_settings:
+            continue
+
+        remote = client.get("application.one", {"applicationId": app_id})
+
+        update_payload: dict = {"applicationId": app_id}
+        changed = False
+
+        if command is not None and remote.get("command") != command:
+            resolved = resolve_refs(command, state)
+            update_payload["command"] = resolved
+            changed = True
+
+        for key in ("replicas", "autoDeploy"):
+            if key in app_def and remote.get(key) != app_def[key]:
+                update_payload[key] = app_def[key]
+                changed = True
+
+        if changed:
+            client.post("application.update", update_payload)
+
+
 class DokployClient:
     """Thin httpx wrapper for Dokploy API."""
 
@@ -1252,6 +1289,7 @@ def cmd_apply(
         reconcile_app_schedules(client, cfg, load_state(state_file), state_file)
         reconcile_app_mounts(client, cfg, load_state(state_file), state_file)
         reconcile_app_ports(client, cfg, load_state(state_file), state_file)
+        reconcile_app_settings(client, cfg, load_state(state_file))
 
     print("\n==> Phase 4/4: trigger")
     cmd_trigger(client, cfg, state_file, redeploy=is_redeploy)
@@ -1580,6 +1618,25 @@ def _plan_redeploy(
 
         if compose or app_def is None:
             continue
+
+        settings_diffs: dict = {}
+        for key in ("command", "replicas", "autoDeploy"):
+            if key not in app_def:
+                continue
+            desired_val = app_def[key]
+            remote_val = remote.get(key)
+            if remote_val != desired_val:
+                settings_diffs[key] = (remote_val, desired_val)
+        if settings_diffs:
+            changes.append(
+                {
+                    "action": "update",
+                    "resource_type": "settings",
+                    "name": name,
+                    "parent": None,
+                    "attrs": settings_diffs,
+                }
+            )
 
         volumes = app_def.get("volumes")
         if volumes is not None or "mounts" in state["apps"].get(name, {}):
