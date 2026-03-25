@@ -4327,3 +4327,464 @@ class TestSecuritySchemaValidation:
         app = security_config["apps"][0]
         usernames = {s["username"] for s in app["security"]}
         assert usernames == {"admin", "deploy"}
+
+
+# ── Redirects ──────────────────────────────────────────────────────
+
+
+class TestBuildRedirectPayload:
+    def test_basic_redirect(self):
+        """build_redirect_payload returns correct structure."""
+        result = dokploy.build_redirect_payload(
+            "app-1",
+            {
+                "regex": "^/old/(.*)",
+                "replacement": "/new/$1",
+                "permanent": True,
+            },
+        )
+        assert result == {
+            "applicationId": "app-1",
+            "regex": "^/old/(.*)",
+            "replacement": "/new/$1",
+            "permanent": True,
+        }
+
+    def test_temporary_redirect(self):
+        """build_redirect_payload handles permanent=False."""
+        result = dokploy.build_redirect_payload(
+            "app-2",
+            {
+                "regex": "^/blog$",
+                "replacement": "https://blog.example.com",
+                "permanent": False,
+            },
+        )
+        assert result["permanent"] is False
+        assert result["applicationId"] == "app-2"
+
+
+class TestReconcileRedirects:
+    def test_reconcile_creates_new_deletes_removed_updates_existing(self):
+        """reconcile_redirects creates new, updates changed, deletes removed."""
+        existing = [
+            {
+                "redirectId": "r1",
+                "regex": "^/keep/(.*)",
+                "replacement": "/old/$1",
+                "permanent": True,
+            },
+            {
+                "redirectId": "r2",
+                "regex": "^/remove$",
+                "replacement": "/gone",
+                "permanent": False,
+            },
+        ]
+        desired = [
+            {
+                "regex": "^/keep/(.*)",
+                "replacement": "/new/$1",
+                "permanent": True,
+            },
+            {
+                "regex": "^/add$",
+                "replacement": "/added",
+                "permanent": False,
+            },
+        ]
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "redirects.create": {"redirectId": "r3"},
+        }.get(endpoint, {})
+
+        result = dokploy.reconcile_redirects(client, "app-1", existing, desired)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "redirects.update"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["redirectId"] == "r1"
+        assert update_calls[0][0][1]["replacement"] == "/new/$1"
+
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "redirects.delete"]
+        assert len(delete_calls) == 1
+        assert delete_calls[0][0][1]["redirectId"] == "r2"
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "redirects.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["regex"] == "^/add$"
+
+        assert "^/keep/(.*)" in result
+        assert result["^/keep/(.*)"]["redirectId"] == "r1"
+        assert "^/add$" in result
+        assert result["^/add$"]["redirectId"] == "r3"
+        assert "^/remove$" not in result
+
+    def test_reconcile_no_changes(self):
+        """reconcile_redirects does nothing when desired matches existing."""
+        existing = [
+            {
+                "redirectId": "r1",
+                "regex": "^/path$",
+                "replacement": "/dest",
+                "permanent": True,
+            },
+        ]
+        desired = [
+            {
+                "regex": "^/path$",
+                "replacement": "/dest",
+                "permanent": True,
+            },
+        ]
+        client = MagicMock()
+        dokploy.reconcile_redirects(client, "app-1", existing, desired)
+
+        assert len(client.post.call_args_list) == 0
+
+    def test_reconcile_all_removed(self):
+        """reconcile_redirects deletes all when desired is empty."""
+        existing = [
+            {
+                "redirectId": "r1",
+                "regex": "^/path$",
+                "replacement": "/dest",
+                "permanent": True,
+            },
+        ]
+        client = MagicMock()
+        result = dokploy.reconcile_redirects(client, "app-1", existing, [])
+
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "redirects.delete"]
+        assert len(delete_calls) == 1
+        assert delete_calls[0][0][1]["redirectId"] == "r1"
+        assert result == {}
+
+
+class TestReconcileAppRedirects:
+    def test_fetches_redirects_from_application_one(self, tmp_path):
+        """reconcile_app_redirects fetches existing from application.one."""
+        state_file = tmp_path / "state.json"
+        state = {
+            "projectId": "proj-1",
+            "apps": {"web": {"applicationId": "app-1"}},
+        }
+        state_file.write_text(json.dumps(state))
+        cfg = {
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "redirects": [
+                        {
+                            "regex": "^/new$",
+                            "replacement": "/dest",
+                            "permanent": True,
+                        }
+                    ],
+                }
+            ]
+        }
+        client = MagicMock()
+        client.get.return_value = {"redirects": []}
+        client.post.return_value = {"redirectId": "r1"}
+
+        dokploy.reconcile_app_redirects(client, cfg, state, state_file)
+
+        client.get.assert_called_once_with("application.one", {"applicationId": "app-1"})
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "redirects.create"]
+        assert len(create_calls) == 1
+
+    def test_skips_compose_apps(self, tmp_path):
+        """reconcile_app_redirects skips compose apps."""
+        state_file = tmp_path / "state.json"
+        state = {
+            "projectId": "proj-1",
+            "apps": {"web": {"composeId": "comp-1", "source": "compose"}},
+        }
+        state_file.write_text(json.dumps(state))
+        cfg = {
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "compose",
+                    "redirects": [
+                        {
+                            "regex": "^/test$",
+                            "replacement": "/dest",
+                            "permanent": True,
+                        }
+                    ],
+                }
+            ]
+        }
+        client = MagicMock()
+
+        dokploy.reconcile_app_redirects(client, cfg, state, state_file)
+
+        client.get.assert_not_called()
+
+
+class TestSetupRedirects:
+    def test_redirects_create_calls(self, tmp_path):
+        """cmd_setup creates redirects via API."""
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        cfg = {
+            "project": {"name": "test", "description": "test", "deploy_order": [["web"]]},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx:latest",
+                    "redirects": [
+                        {
+                            "regex": "^/old$",
+                            "replacement": "/new",
+                            "permanent": True,
+                        }
+                    ],
+                }
+            ],
+        }
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "project.create": {
+                "project": {"projectId": "proj-1"},
+                "environment": {"environmentId": "env-1"},
+            },
+            "application.create": {"applicationId": "app-1", "appName": "web-abc"},
+            "redirects.create": {"redirectId": "r1"},
+        }.get(endpoint, {})
+        client.get.return_value = []
+
+        dokploy.cmd_setup(client, cfg, state_file, tmp_path)
+
+        redirect_calls = [c for c in client.post.call_args_list if c[0][0] == "redirects.create"]
+        assert len(redirect_calls) == 1
+        assert redirect_calls[0][0][1]["regex"] == "^/old$"
+
+    def test_redirects_stored_in_state(self, tmp_path):
+        """cmd_setup stores redirect IDs in state."""
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        cfg = {
+            "project": {"name": "test", "description": "test", "deploy_order": [["web"]]},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx:latest",
+                    "redirects": [
+                        {
+                            "regex": "^/old$",
+                            "replacement": "/new",
+                            "permanent": True,
+                        }
+                    ],
+                }
+            ],
+        }
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "project.create": {
+                "project": {"projectId": "proj-1"},
+                "environment": {"environmentId": "env-1"},
+            },
+            "application.create": {"applicationId": "app-1", "appName": "web-abc"},
+            "redirects.create": {"redirectId": "r1"},
+        }.get(endpoint, {})
+        client.get.return_value = []
+
+        dokploy.cmd_setup(client, cfg, state_file, tmp_path)
+
+        import json
+
+        saved_state = json.loads(state_file.read_text())
+        assert saved_state["apps"]["web"]["redirects"]["^/old$"]["redirectId"] == "r1"
+
+    def test_no_redirects_skips(self, tmp_path):
+        """cmd_setup skips redirect creation when none defined."""
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+        cfg = {
+            "project": {"name": "test", "description": "test", "deploy_order": [["web"]]},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx:latest",
+                }
+            ],
+        }
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "project.create": {
+                "project": {"projectId": "proj-1"},
+                "environment": {"environmentId": "env-1"},
+            },
+            "application.create": {"applicationId": "app-1", "appName": "web-abc"},
+        }.get(endpoint, {})
+        client.get.return_value = []
+
+        dokploy.cmd_setup(client, cfg, state_file, tmp_path)
+
+        redirect_calls = [c for c in client.post.call_args_list if c[0][0] == "redirects.create"]
+        assert len(redirect_calls) == 0
+
+
+class TestCmdApplyReconcileRedirects:
+    def test_redeploy_calls_reconcile_app_redirects(self, tmp_path, monkeypatch):
+        """cmd_apply calls reconcile_app_redirects on redeploy."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+        state_file.parent.mkdir(parents=True)
+
+        state_file.write_text(json.dumps({"projectId": "proj-1", "apps": {}}))
+
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_mounts", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_ports", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(
+            icarus_commands,
+            "reconcile_app_redirects",
+            lambda client, cfg, state, sf: calls.append("reconcile_app_redirects"),
+        )
+
+        dokploy.cmd_apply(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "reconcile_app_redirects" in calls
+
+    def test_fresh_deploy_does_not_call_reconcile_app_redirects(self, tmp_path, monkeypatch):
+        """cmd_apply does NOT call reconcile_app_redirects on fresh deploy."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "prod.json"
+
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands,
+            "reconcile_app_redirects",
+            lambda client, cfg, state, sf: calls.append("reconcile_app_redirects"),
+        )
+
+        dokploy.cmd_apply(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "reconcile_app_redirects" not in calls
+
+
+class TestPlanRedirects:
+    @pytest.fixture
+    def redirects_config(self):
+        return {
+            "project": {"name": "test-proj", "deploy_order": [["web"]]},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx:latest",
+                    "redirects": [
+                        {
+                            "regex": "^/old$",
+                            "replacement": "/new",
+                            "permanent": True,
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def _mock_client(self):
+        client = MagicMock()
+        client.get.return_value = {}
+        return client
+
+    def test_initial_setup_shows_redirect_creates(self, tmp_path, redirects_config):
+        """compute_plan shows redirect creates on fresh setup."""
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._mock_client()
+
+        changes = dokploy.compute_plan(client, redirects_config, state_file, tmp_path)
+
+        redirect_creates = [c for c in changes if c["resource_type"] == "redirect"]
+        assert len(redirect_creates) == 1
+        assert redirect_creates[0]["action"] == "create"
+        assert redirect_creates[0]["name"] == "^/old$"
+        assert redirect_creates[0]["parent"] == "web"
+        assert redirect_creates[0]["attrs"]["permanent"] is True
+
+    def test_redeploy_shows_redirect_changes(self, tmp_path, redirects_config):
+        """_plan_redeploy detects redirect additions, removals, and updates."""
+        state = {
+            "projectId": "proj-1",
+            "apps": {
+                "web": {
+                    "applicationId": "app-1",
+                    "redirects": {"^/old$": {"redirectId": "r1"}},
+                },
+            },
+        }
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "application.one":
+                return {
+                    "env": "",
+                    "redirects": [
+                        {
+                            "redirectId": "r1",
+                            "regex": "^/old$",
+                            "replacement": "/old-dest",
+                            "permanent": False,
+                        }
+                    ],
+                }
+            return {}
+
+        client.get.side_effect = mock_get
+
+        changes = []
+        dokploy._plan_redeploy(client, redirects_config, state, tmp_path, changes)
+
+        redirect_changes = [c for c in changes if c["resource_type"] == "redirect"]
+        assert len(redirect_changes) == 1
+        assert redirect_changes[0]["action"] == "update"
+        assert "replacement" in redirect_changes[0]["attrs"]
+
+    def test_no_redirects_no_changes(self, tmp_path):
+        """compute_plan with no redirects produces no redirect changes."""
+        cfg = {
+            "project": {"name": "test-proj", "deploy_order": [["web"]]},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx:latest",
+                }
+            ],
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._mock_client()
+
+        changes = dokploy.compute_plan(client, cfg, state_file, tmp_path)
+
+        redirect_changes = [c for c in changes if c["resource_type"] == "redirect"]
+        assert len(redirect_changes) == 0

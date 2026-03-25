@@ -294,6 +294,15 @@ def _setup_router(
     ):
         router.post(f"{BASE_URL}/api/{endpoint}").mock(return_value=httpx.Response(200, json={}))
 
+    # redirects.create needs a redirectId in the response
+    redirect_counter = {"n": 0}
+
+    def _create_redirect(request):
+        redirect_counter["n"] += 1
+        return httpx.Response(200, json={"redirectId": f"redirect-{redirect_counter['n']:03d}"})
+
+    router.post(f"{BASE_URL}/api/redirects.create").mock(side_effect=_create_redirect)
+
     return ids
 
 
@@ -445,6 +454,9 @@ class TestCmdSetup:
         router.post(f"{BASE_URL}/api/application.saveBuildType").mock(return_value=httpx.Response(200, json={}))
         router.post(f"{BASE_URL}/api/application.update").mock(return_value=httpx.Response(200, json={}))
         router.post(f"{BASE_URL}/api/domain.create").mock(return_value=httpx.Response(200, json={}))
+        router.post(f"{BASE_URL}/api/redirects.create").mock(
+            return_value=httpx.Response(200, json={"redirectId": "redirect-001"})
+        )
         client = _make_client(router)
 
         state_file = tmp_path / ".dokploy-state" / "test.json"

@@ -49,6 +49,10 @@ apps:
     dockerImage: redis:7-alpine
   - name: web
     source: github
+    redirects:
+      - regex: "^/blog$"
+        replacement: "https://blog.example.com"
+        permanent: true
   - name: worker
     source: github
     command: "celery -A myproject worker --loglevel=INFO"
