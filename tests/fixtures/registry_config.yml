@@ -1,0 +1,18 @@
+project:
+  name: registry-test
+  description: "Registry test project"
+  deploy_order:
+    - - app
+
+registries:
+  - name: ghcr
+    registryUrl: https://ghcr.io
+    username: myuser
+    password: ghp_token123
+    imagePrefix: myorg
+
+apps:
+  - name: app
+    source: docker
+    dockerImage: ghcr.io/myorg/myapp:latest
+    registry: ghcr

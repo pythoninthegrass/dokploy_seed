@@ -47,6 +47,20 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
         }
     )
 
+    for reg_def in cfg.get("registries", []):
+        changes.append(
+            {
+                "action": "create",
+                "resource_type": "registry",
+                "name": reg_def["name"],
+                "parent": None,
+                "attrs": {
+                    "registryUrl": reg_def["registryUrl"],
+                    "imagePrefix": reg_def.get("imagePrefix"),
+                },
+            }
+        )
+
     for app_def in cfg["apps"]:
         name = app_def["name"]
         compose = is_compose(app_def)
@@ -57,6 +71,8 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
                 attrs["dockerImage"] = app_def.get("dockerImage", "")
             elif app_def.get("source") == "github":
                 attrs["buildType"] = app_def.get("buildType", "dockerfile")
+            if app_def.get("registry"):
+                attrs["registry"] = app_def["registry"]
         changes.append(
             {
                 "action": "create",

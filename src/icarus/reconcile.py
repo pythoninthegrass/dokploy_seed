@@ -7,8 +7,11 @@ from icarus.payloads import (
     build_domain_payload,
     build_mount_payload,
     build_port_payload,
+    build_registry_create_payload,
+    build_registry_update_payload,
     build_schedule_payload,
     is_compose,
+    resolve_registry_id,
 )
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -332,3 +335,60 @@ def reconcile_app_settings(
 
         if changed:
             client.post("application.update", update_payload)
+
+
+def reconcile_registries(
+    client: DokployClient,
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+) -> None:
+    """Reconcile registries: create missing, update existing credentials."""
+    registries_cfg = cfg.get("registries", [])
+    if not registries_cfg:
+        return
+
+    existing_registries = client.get("registry.all")
+    existing_by_name = {r["registryName"]: r for r in existing_registries}
+
+    if "registries" not in state:
+        state["registries"] = {}
+
+    for reg_def in registries_cfg:
+        name = reg_def["name"]
+        if name in existing_by_name:
+            registry_id = existing_by_name[name]["registryId"]
+            update_payload = build_registry_update_payload(registry_id, reg_def)
+            client.post("registry.update", update_payload)
+        else:
+            payload = build_registry_create_payload(reg_def)
+            resp = client.post("registry.create", payload)
+            registry_id = resp["registryId"]
+        state["registries"][name] = {"registryId": registry_id}
+
+    save_state(state, state_file)
+
+
+def reconcile_app_registry(
+    client: DokployClient,
+    cfg: dict,
+    state: dict,
+) -> None:
+    """Reconcile app-to-registry associations on redeploy."""
+    for app_def in cfg.get("apps", []):
+        if is_compose(app_def):
+            continue
+        name = app_def["name"]
+        app_info = state["apps"].get(name)
+        if not app_info or "applicationId" not in app_info:
+            continue
+
+        app_id = app_info["applicationId"]
+        registry_name = app_def.get("registry")
+        desired_registry_id = resolve_registry_id(state, registry_name) if registry_name else None
+
+        remote = client.get("application.one", {"applicationId": app_id})
+        current_registry_id = remote.get("registryId")
+
+        if current_registry_id != desired_registry_id:
+            client.post("application.update", {"applicationId": app_id, "registryId": desired_registry_id})

@@ -21,20 +21,25 @@ from icarus.payloads import (
     build_github_provider_payload,
     build_mount_payload,
     build_port_payload,
+    build_registry_create_payload,
+    build_registry_update_payload,
     build_schedule_payload,
     database_endpoint,
     database_id_key,
     is_compose,
     resolve_compose_file,
     resolve_github_provider,
+    resolve_registry_id,
 )
 from icarus.plan import cmd_plan, compute_plan
 from icarus.reconcile import (
     reconcile_app_domains,
     reconcile_app_mounts,
     reconcile_app_ports,
+    reconcile_app_registry,
     reconcile_app_schedules,
     reconcile_app_settings,
+    reconcile_registries,
 )
 from icarus.ssh import (
     cleanup_stale_routes,
@@ -212,6 +217,28 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
         "apps": {},
     }
 
+    # 2.5 Registries (server-level, idempotent)
+    registries_cfg = cfg.get("registries", [])
+    if registries_cfg:
+        print("Resolving container registries...")
+        existing_registries = client.get("registry.all")
+        existing_by_name = {r["registryName"]: r for r in existing_registries}
+        state["registries"] = {}
+        for reg_def in registries_cfg:
+            name = reg_def["name"]
+            if name in existing_by_name:
+                registry_id = existing_by_name[name]["registryId"]
+                print(f"  Registry '{name}' exists: {registry_id}, updating credentials...")
+                update_payload = build_registry_update_payload(registry_id, reg_def)
+                client.post("registry.update", update_payload)
+            else:
+                print(f"  Creating registry: {name}...")
+                payload = build_registry_create_payload(reg_def)
+                resp = client.post("registry.create", payload)
+                registry_id = resp["registryId"]
+                print(f"  Registry created: {registry_id}")
+            state["registries"][name] = {"registryId": registry_id}
+
     # 3. Create apps
     for app_def in cfg["apps"]:
         name = app_def["name"]
@@ -286,6 +313,16 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
             print(f"  Setting buildType={build_type} for {name}...")
             build_payload = build_build_type_payload(app_id, app_def)
             client.post("application.saveBuildType", build_payload)
+
+        # Associate registry if specified
+        registry_name = app_def.get("registry")
+        if registry_name:
+            registry_id = resolve_registry_id(state, registry_name)
+            if not registry_id:
+                print(f"ERROR: App '{name}' references unknown registry '{registry_name}'")
+                sys.exit(1)
+            print(f"  Associating registry '{registry_name}' with {name}...")
+            client.post("application.update", {"applicationId": app_id, "registryId": registry_id})
 
     # 5. Command overrides (resolve {ref} placeholders)
     for app_def in cfg["apps"]:
@@ -546,6 +583,8 @@ def cmd_apply(
 
     if is_redeploy:
         cleanup_stale_routes(load_state(state_file), cfg)
+        reconcile_registries(client, cfg, load_state(state_file), state_file)
+        reconcile_app_registry(client, cfg, load_state(state_file))
         reconcile_app_domains(client, cfg, load_state(state_file), state_file)
         reconcile_app_schedules(client, cfg, load_state(state_file), state_file)
         reconcile_app_mounts(client, cfg, load_state(state_file), state_file)
@@ -710,6 +749,18 @@ def cmd_import(client: DokployClient, cfg: dict, state_file: Path) -> None:
             "appName": srv["appName"],
         }
         print(f"  {name}: id={srv['applicationId']} appName={srv['appName']}")
+
+    # Import registries referenced by config
+    registries_cfg = cfg.get("registries", [])
+    if registries_cfg:
+        existing_registries = client.get("registry.all")
+        existing_by_name = {r["registryName"]: r for r in existing_registries}
+        state["registries"] = {}
+        for reg_def in registries_cfg:
+            name = reg_def["name"]
+            if name in existing_by_name:
+                state["registries"][name] = {"registryId": existing_by_name[name]["registryId"]}
+                print(f"  Registry '{name}': {existing_by_name[name]['registryId']}")
 
     save_state(state, state_file)
     print("\nImport complete!")
