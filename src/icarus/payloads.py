@@ -186,6 +186,36 @@ def build_port_payload(app_id: str, port: dict) -> dict:
     }
 
 
+def build_registry_create_payload(reg_def: dict) -> dict:
+    """Build the API payload for creating a container registry."""
+    return {
+        "registryName": reg_def["name"],
+        "username": reg_def["username"],
+        "password": reg_def["password"],
+        "registryUrl": reg_def["registryUrl"],
+        "registryType": "cloud",
+        "imagePrefix": reg_def.get("imagePrefix"),
+    }
+
+
+def build_registry_update_payload(registry_id: str, reg_def: dict) -> dict:
+    """Build the API payload for updating a container registry."""
+    return {
+        "registryId": registry_id,
+        "registryName": reg_def["name"],
+        "username": reg_def["username"],
+        "password": reg_def["password"],
+        "registryUrl": reg_def["registryUrl"],
+        "registryType": "cloud",
+        "imagePrefix": reg_def.get("imagePrefix"),
+    }
+
+
+def resolve_registry_id(state: dict, registry_name: str) -> str | None:
+    """Look up registryId by name from state."""
+    return state.get("registries", {}).get(registry_name, {}).get("registryId")
+
+
 def build_security_payload(app_id: str, sec: dict) -> dict:
     """Build payload for security.create."""
     return {
@@ -203,6 +233,7 @@ def build_redirect_payload(app_id: str, redirect: dict) -> dict:
         "replacement": redirect["replacement"],
         "permanent": redirect["permanent"],
     }
+
 
 
 def build_schedule_payload(app_id: str, sched: dict) -> dict:

@@ -39,6 +39,13 @@ def validate_config(cfg: dict) -> None:
         print("ERROR: GitHub-sourced apps exist but no [github] config found")
         sys.exit(1)
 
+    registry_names = {r["name"] for r in cfg.get("registries", [])}
+    for app_def in cfg["apps"]:
+        reg_ref = app_def.get("registry")
+        if reg_ref and reg_ref not in registry_names:
+            print(f"ERROR: App '{app_def['name']}' references unknown registry '{reg_ref}'")
+            sys.exit(1)
+
 
 def validate_env_references(cfg: dict) -> None:
     """Check that environment app overrides reference apps that exist in the base config."""

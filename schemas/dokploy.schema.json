@@ -196,6 +196,10 @@
                   },
                   "description": "Cron jobs that run commands inside the app container"
                 },
+                "registry": {
+                  "type": "string",
+                  "description": "Registry name override"
+                },
                 "security": {
                   "type": "array",
                   "items": {
@@ -352,6 +356,10 @@
             },
             "description": "Cron jobs that run commands inside the app container"
           },
+          "registry": {
+            "type": "string",
+            "description": "Registry name (from registries section) for Docker image pulls"
+          },
           "security": {
             "type": "array",
             "items": {
@@ -379,6 +387,13 @@
             "dockerImage"
           ]
         }
+      }
+    },
+    "registries": {
+      "type": "array",
+      "description": "Container registries for Docker image pulls",
+      "items": {
+        "$ref": "#/$defs/registry_entry"
       }
     },
     "database": {
@@ -580,6 +595,38 @@
         "stripPath": {
           "type": "boolean",
           "description": "Strip path prefix before forwarding (default: false)"
+        }
+      }
+    },
+    "registry_entry": {
+      "type": "object",
+      "required": [
+        "name",
+        "registryUrl",
+        "username",
+        "password"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique registry name (used for matching and app references)"
+        },
+        "registryUrl": {
+          "type": "string",
+          "description": "Registry URL (e.g. https://ghcr.io, https://registry.hub.docker.com)"
+        },
+        "username": {
+          "type": "string",
+          "description": "Registry username"
+        },
+        "password": {
+          "type": "string",
+          "description": "Registry password or token"
+        },
+        "imagePrefix": {
+          "type": ["string", "null"],
+          "description": "Image prefix (e.g. org name for ghcr.io)"
         }
       }
     },

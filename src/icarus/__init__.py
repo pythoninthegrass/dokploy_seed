@@ -33,6 +33,8 @@ from icarus.payloads import (
     build_mount_payload,
     build_port_payload,
     build_redirect_payload,
+    build_registry_create_payload,
+    build_registry_update_payload,
     build_schedule_payload,
     build_security_payload,
     database_endpoint,
@@ -40,6 +42,7 @@ from icarus.payloads import (
     is_compose,
     resolve_compose_file,
     resolve_github_provider,
+    resolve_registry_id,
 )
 from icarus.plan import (
     _env_keys,
@@ -54,6 +57,7 @@ from icarus.reconcile import (
     reconcile_app_mounts,
     reconcile_app_ports,
     reconcile_app_redirects,
+    reconcile_app_registry,
     reconcile_app_schedules,
     reconcile_app_security,
     reconcile_app_settings,
@@ -61,6 +65,7 @@ from icarus.reconcile import (
     reconcile_mounts,
     reconcile_ports,
     reconcile_redirects,
+    reconcile_registries,
     reconcile_schedules,
     reconcile_security,
 )

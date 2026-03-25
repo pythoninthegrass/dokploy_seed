@@ -3956,6 +3956,304 @@ class TestComputePlanDatabases:
         assert len(db_creates) == 0
 
 
+class TestBuildRegistryPayloads:
+    def test_build_registry_create_payload(self):
+        reg_def = {
+            "name": "ghcr",
+            "registryUrl": "https://ghcr.io",
+            "username": "myuser",
+            "password": "mytoken",
+        }
+        payload = dokploy.build_registry_create_payload(reg_def)
+        assert payload == {
+            "registryName": "ghcr",
+            "username": "myuser",
+            "password": "mytoken",
+            "registryUrl": "https://ghcr.io",
+            "registryType": "cloud",
+            "imagePrefix": None,
+        }
+
+    def test_build_registry_create_payload_with_image_prefix(self):
+        reg_def = {
+            "name": "ghcr",
+            "registryUrl": "https://ghcr.io",
+            "username": "myuser",
+            "password": "mytoken",
+            "imagePrefix": "myorg",
+        }
+        payload = dokploy.build_registry_create_payload(reg_def)
+        assert payload["imagePrefix"] == "myorg"
+
+    def test_build_registry_update_payload(self):
+        reg_def = {
+            "name": "ghcr",
+            "registryUrl": "https://ghcr.io",
+            "username": "myuser",
+            "password": "newtoken",
+        }
+        payload = dokploy.build_registry_update_payload("reg-123", reg_def)
+        assert payload["registryId"] == "reg-123"
+        assert payload["registryName"] == "ghcr"
+        assert payload["password"] == "newtoken"
+        assert payload["registryType"] == "cloud"
+
+    def test_resolve_registry_id_found(self):
+        state = {"registries": {"ghcr": {"registryId": "reg-abc"}}}
+        assert dokploy.resolve_registry_id(state, "ghcr") == "reg-abc"
+
+    def test_resolve_registry_id_missing(self):
+        state = {"registries": {"ghcr": {"registryId": "reg-abc"}}}
+        assert dokploy.resolve_registry_id(state, "dockerhub") is None
+
+    def test_resolve_registry_id_no_registries_section(self):
+        state = {"apps": {}}
+        assert dokploy.resolve_registry_id(state, "ghcr") is None
+
+
+class TestValidateConfigRegistry:
+    def test_app_references_unknown_registry_exits(self, minimal_config):
+        minimal_config["apps"][0]["registry"] = "nonexistent"
+        with pytest.raises(SystemExit):
+            dokploy.validate_config(minimal_config)
+
+    def test_no_registries_section_passes(self, minimal_config):
+        dokploy.validate_config(minimal_config)
+
+    def test_valid_registry_reference_passes(self, registry_config):
+        dokploy.validate_config(registry_config)
+
+
+class TestCmdSetupRegistries:
+    def _make_mock_client(self, existing_registries=None):
+        client = MagicMock()
+
+        def fake_post(endpoint, payload=None):
+            if endpoint == "project.create":
+                return {
+                    "project": {"projectId": "proj-1"},
+                    "environment": {"environmentId": "env-1"},
+                }
+            if endpoint == "application.create":
+                name = (payload or {}).get("name", "app")
+                return {"applicationId": f"app-{name}-id", "appName": f"app-{name}"}
+            if endpoint == "registry.create":
+                return {"registryId": "reg-new-id"}
+            if endpoint == "registry.update":
+                return {}
+            if endpoint == "application.update":
+                return {}
+            if endpoint == "application.saveDockerProvider":
+                return {}
+            return {}
+
+        client.post = MagicMock(side_effect=fake_post)
+        client.get = MagicMock(return_value=existing_registries or [])
+        return client
+
+    def test_registries_created_during_setup(self, tmp_path, registry_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client(existing_registries=[])
+
+        dokploy.cmd_setup(client, registry_config, state_file)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "registry.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["registryName"] == "ghcr"
+
+    def test_existing_registry_reused_and_updated(self, tmp_path, registry_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        existing = [{"registryName": "ghcr", "registryId": "reg-existing"}]
+        client = self._make_mock_client(existing_registries=existing)
+
+        dokploy.cmd_setup(client, registry_config, state_file)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "registry.create"]
+        assert len(create_calls) == 0
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "registry.update"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["registryId"] == "reg-existing"
+
+    def test_registry_state_saved(self, tmp_path, registry_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client(existing_registries=[])
+
+        dokploy.cmd_setup(client, registry_config, state_file)
+
+        state = json.loads(state_file.read_text())
+        assert "registries" in state
+        assert "ghcr" in state["registries"]
+        assert state["registries"]["ghcr"]["registryId"] == "reg-new-id"
+
+    def test_app_registry_association(self, tmp_path, registry_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client(existing_registries=[])
+
+        dokploy.cmd_setup(client, registry_config, state_file)
+
+        update_calls = [
+            c for c in client.post.call_args_list if c[0][0] == "application.update" and "registryId" in (c[0][1] or {})
+        ]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["registryId"] == "reg-new-id"
+
+    def test_no_registries_section_backward_compat(self, tmp_path, minimal_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, minimal_config, state_file)
+
+        state = json.loads(state_file.read_text())
+        assert "registries" not in state
+
+
+class TestReconcileRegistries:
+    def test_reconcile_creates_missing_registry(self, tmp_path, registry_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state_file.parent.mkdir(parents=True)
+        state = {"projectId": "proj-1", "environmentId": "env-1", "apps": {}}
+        state_file.write_text(json.dumps(state))
+
+        client = MagicMock()
+        client.get = MagicMock(return_value=[])
+        client.post = MagicMock(return_value={"registryId": "reg-new"})
+
+        from icarus.reconcile import reconcile_registries
+
+        reconcile_registries(client, registry_config, state, state_file)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "registry.create"]
+        assert len(create_calls) == 1
+        assert state["registries"]["ghcr"]["registryId"] == "reg-new"
+
+    def test_reconcile_updates_existing_registry(self, tmp_path, registry_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state_file.parent.mkdir(parents=True)
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {},
+            "registries": {"ghcr": {"registryId": "reg-old"}},
+        }
+        state_file.write_text(json.dumps(state))
+
+        client = MagicMock()
+        client.get = MagicMock(return_value=[{"registryName": "ghcr", "registryId": "reg-old"}])
+        client.post = MagicMock(return_value={})
+
+        from icarus.reconcile import reconcile_registries
+
+        reconcile_registries(client, registry_config, state, state_file)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "registry.update"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["registryId"] == "reg-old"
+
+
+class TestReconcileAppRegistry:
+    def test_reconcile_app_registry_changed(self):
+        client = MagicMock()
+        client.get = MagicMock(return_value={"registryId": "reg-old"})
+        client.post = MagicMock(return_value={})
+
+        state = {
+            "apps": {"app": {"applicationId": "app-1"}},
+            "registries": {"ghcr": {"registryId": "reg-new"}},
+        }
+        cfg = {
+            "apps": [{"name": "app", "source": "docker", "dockerImage": "img", "registry": "ghcr"}],
+        }
+
+        from icarus.reconcile import reconcile_app_registry
+
+        reconcile_app_registry(client, cfg, state)
+
+        update_calls = [
+            c for c in client.post.call_args_list if c[0][0] == "application.update" and "registryId" in (c[0][1] or {})
+        ]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["registryId"] == "reg-new"
+
+    def test_reconcile_app_registry_removed(self):
+        client = MagicMock()
+        client.get = MagicMock(return_value={"registryId": "reg-old"})
+        client.post = MagicMock(return_value={})
+
+        state = {
+            "apps": {"app": {"applicationId": "app-1"}},
+        }
+        cfg = {
+            "apps": [{"name": "app", "source": "docker", "dockerImage": "img"}],
+        }
+
+        from icarus.reconcile import reconcile_app_registry
+
+        reconcile_app_registry(client, cfg, state)
+
+        update_calls = [
+            c for c in client.post.call_args_list if c[0][0] == "application.update" and c[0][1].get("registryId") is None
+        ]
+        assert len(update_calls) == 1
+
+    def test_reconcile_app_registry_unchanged(self):
+        client = MagicMock()
+        client.get = MagicMock(return_value={"registryId": "reg-1"})
+        client.post = MagicMock(return_value={})
+
+        state = {
+            "apps": {"app": {"applicationId": "app-1"}},
+            "registries": {"ghcr": {"registryId": "reg-1"}},
+        }
+        cfg = {
+            "apps": [{"name": "app", "source": "docker", "dockerImage": "img", "registry": "ghcr"}],
+        }
+
+        from icarus.reconcile import reconcile_app_registry
+
+        reconcile_app_registry(client, cfg, state)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "application.update"]
+        assert len(update_calls) == 0
+
+
+class TestComputePlanRegistries:
+    def _mock_client(self):
+        client = MagicMock()
+        client.get = MagicMock(return_value=[])
+        return client
+
+    def test_plan_initial_shows_registry_creates(self, tmp_path, registry_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._mock_client()
+
+        changes = dokploy.compute_plan(client, registry_config, state_file, tmp_path)
+
+        reg_creates = [c for c in changes if c["resource_type"] == "registry"]
+        assert len(reg_creates) == 1
+        assert reg_creates[0]["name"] == "ghcr"
+        assert reg_creates[0]["action"] == "create"
+        assert reg_creates[0]["attrs"]["registryUrl"] == "https://ghcr.io"
+
+    def test_plan_initial_app_shows_registry_attr(self, tmp_path, registry_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._mock_client()
+
+        changes = dokploy.compute_plan(client, registry_config, state_file, tmp_path)
+
+        app_creates = [c for c in changes if c["resource_type"] == "application"]
+        assert len(app_creates) == 1
+        assert app_creates[0]["attrs"].get("registry") == "ghcr"
+
+    def test_plan_no_registries_no_changes(self, tmp_path, minimal_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._mock_client()
+
+        changes = dokploy.compute_plan(client, minimal_config, state_file, tmp_path)
+
+        reg_creates = [c for c in changes if c["resource_type"] == "registry"]
+        assert len(reg_creates) == 0
+
+
 class TestBuildSecurityPayload:
     def test_payload_structure(self):
         result = dokploy.build_security_payload("app-1", {"username": "admin", "password": "s3cret"})
@@ -4199,6 +4497,9 @@ class TestCmdApplyReconcileSecurity:
         monkeypatch.setattr(icarus_commands, "reconcile_app_mounts", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_ports", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_settings", lambda client, cfg, state: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_registries", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_registry", lambda client, cfg, state: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_redirects", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(
             icarus_commands,
             "reconcile_app_security",
@@ -4652,6 +4953,10 @@ class TestCmdApplyReconcileRedirects:
         monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_mounts", lambda client, cfg, state, sf: None)
         monkeypatch.setattr(icarus_commands, "reconcile_app_ports", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_security", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_settings", lambda client, cfg, state: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_registries", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_registry", lambda client, cfg, state: None)
         monkeypatch.setattr(
             icarus_commands,
             "reconcile_app_redirects",

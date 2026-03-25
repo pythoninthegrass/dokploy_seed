@@ -86,6 +86,12 @@ def database_config():
 
 
 @pytest.fixture
+def registry_config():
+    """Config with container registry and app referencing it."""
+    return _load_fixture("registry_config.yml")
+
+
+@pytest.fixture
 def security_config():
     """Config with basic auth security entries."""
     return _load_fixture("security_config.yml")
