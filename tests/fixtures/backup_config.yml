@@ -1,0 +1,34 @@
+project:
+  name: backup-test
+  description: "Backup test project"
+  deploy_order:
+    - - app
+
+apps:
+  - name: app
+    source: docker
+    dockerImage: nginx:alpine
+
+destinations:
+  - name: s3-backups
+    accessKey: AKIAIOSFODNN7EXAMPLE
+    secretAccessKey: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    bucket: my-dokploy-backups
+    region: us-east-1
+    endpoint: https://s3.amazonaws.com
+
+database:
+  - name: mydb
+    type: postgres
+    databaseName: myapp
+    databaseUser: myuser
+    databasePassword: secret123
+    backups:
+      - schedule: "0 0 * * *"
+        prefix: daily
+        destination: s3-backups
+        enabled: true
+        keepLatestCount: 7
+  - name: cache
+    type: redis
+    databasePassword: redis_secret

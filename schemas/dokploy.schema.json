@@ -396,6 +396,13 @@
         "$ref": "#/$defs/registry_entry"
       }
     },
+    "destinations": {
+      "type": "array",
+      "description": "S3-compatible backup destinations",
+      "items": {
+        "$ref": "#/$defs/destination_entry"
+      }
+    },
     "database": {
       "type": "array",
       "description": "Database resources managed by Dokploy (postgres, mysql, mariadb, mongo, redis)",
@@ -630,6 +637,77 @@
         }
       }
     },
+    "destination_entry": {
+      "type": "object",
+      "required": [
+        "name",
+        "accessKey",
+        "secretAccessKey",
+        "bucket",
+        "region",
+        "endpoint"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique destination name (used for referencing in backup configs)"
+        },
+        "accessKey": {
+          "type": "string",
+          "description": "S3 access key ID"
+        },
+        "secretAccessKey": {
+          "type": "string",
+          "description": "S3 secret access key"
+        },
+        "bucket": {
+          "type": "string",
+          "description": "S3 bucket name"
+        },
+        "region": {
+          "type": "string",
+          "description": "S3 region (e.g. us-east-1)"
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "S3-compatible endpoint URL (e.g. https://s3.amazonaws.com)"
+        }
+      }
+    },
+    "backup_entry": {
+      "type": "object",
+      "required": [
+        "schedule",
+        "prefix",
+        "destination"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schedule": {
+          "type": "string",
+          "description": "5-field cron expression for backup frequency"
+        },
+        "prefix": {
+          "type": "string",
+          "description": "Prefix for backup files in the destination bucket"
+        },
+        "destination": {
+          "type": "string",
+          "description": "Destination name (from destinations section)"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the backup schedule is active (default: true)"
+        },
+        "keepLatestCount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of latest backups to retain"
+        }
+      }
+    },
     "database_entry": {
       "type": "object",
       "required": [
@@ -677,6 +755,13 @@
         "description": {
           "type": "string",
           "description": "Optional description for the database"
+        },
+        "backups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/backup_entry"
+          },
+          "description": "Backup schedules for this database"
         }
       },
       "allOf": [

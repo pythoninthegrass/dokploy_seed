@@ -226,6 +226,21 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
                 }
             )
 
+    for dest_def in cfg.get("destinations", []):
+        changes.append(
+            {
+                "action": "create",
+                "resource_type": "destination",
+                "name": dest_def["name"],
+                "parent": None,
+                "attrs": {
+                    "bucket": dest_def["bucket"],
+                    "region": dest_def["region"],
+                    "endpoint": dest_def["endpoint"],
+                },
+            }
+        )
+
     for db_def in cfg.get("database", []):
         changes.append(
             {
@@ -239,6 +254,21 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
                 },
             }
         )
+
+        for backup_def in db_def.get("backups", []):
+            changes.append(
+                {
+                    "action": "create",
+                    "resource_type": "backup",
+                    "name": backup_def["prefix"],
+                    "parent": db_def["name"],
+                    "attrs": {
+                        "schedule": backup_def["schedule"],
+                        "destination": backup_def["destination"],
+                        "keepLatestCount": backup_def.get("keepLatestCount"),
+                    },
+                }
+            )
 
 
 def _plan_redeploy(
@@ -665,6 +695,67 @@ def _plan_redeploy(
                         "name": sname,
                         "parent": name,
                         "attrs": {"command": ex.get("command", "")},
+                    }
+                )
+
+    # Destinations diff
+    existing_dests = state.get("destinations", {})
+    desired_dests = {d["name"]: d for d in cfg.get("destinations", [])}
+
+    for name, dest_def in desired_dests.items():
+        if name not in existing_dests:
+            changes.append(
+                {
+                    "action": "create",
+                    "resource_type": "destination",
+                    "name": name,
+                    "parent": None,
+                    "attrs": {
+                        "bucket": dest_def["bucket"],
+                        "region": dest_def["region"],
+                        "endpoint": dest_def["endpoint"],
+                    },
+                }
+            )
+
+    # Database backup diff
+    for db_def in cfg.get("database", []):
+        db_name = db_def["name"]
+        db_info = state.get("database", {}).get(db_name)
+        if not db_info:
+            continue
+        backups_cfg = db_def.get("backups")
+        if backups_cfg is None and "backups" not in db_info:
+            continue
+
+        existing_backups = db_info.get("backups", {})
+        desired_backups = {b["prefix"]: b for b in (backups_cfg or [])}
+
+        for prefix, backup_def in desired_backups.items():
+            if prefix not in existing_backups:
+                changes.append(
+                    {
+                        "action": "create",
+                        "resource_type": "backup",
+                        "name": prefix,
+                        "parent": db_name,
+                        "attrs": {
+                            "schedule": backup_def["schedule"],
+                            "destination": backup_def["destination"],
+                            "keepLatestCount": backup_def.get("keepLatestCount"),
+                        },
+                    }
+                )
+
+        for prefix in existing_backups:
+            if prefix not in desired_backups:
+                changes.append(
+                    {
+                        "action": "destroy",
+                        "resource_type": "backup",
+                        "name": prefix,
+                        "parent": db_name,
+                        "attrs": {"prefix": prefix},
                     }
                 )
 
