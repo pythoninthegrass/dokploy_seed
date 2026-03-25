@@ -195,6 +195,13 @@
                     "$ref": "#/$defs/schedule"
                   },
                   "description": "Cron jobs that run commands inside the app container"
+                },
+                "redirects": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/redirect"
+                  },
+                  "description": "URL redirects (regex-based 301/302)"
                 }
               }
             }
@@ -337,6 +344,13 @@
               "$ref": "#/$defs/schedule"
             },
             "description": "Cron jobs that run commands inside the app container"
+          },
+          "redirects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/redirect"
+            },
+            "description": "URL redirects (regex-based 301/302)"
           }
         },
         "if": {
@@ -463,6 +477,31 @@
           "type": "boolean",
           "default": true,
           "description": "Whether the schedule is active (default: true)"
+        }
+      }
+    },
+    "redirect": {
+      "type": "object",
+      "required": [
+        "regex",
+        "replacement",
+        "permanent"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "regex": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Regex pattern to match incoming URL paths"
+        },
+        "replacement": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Replacement URL or path (supports regex capture groups)"
+        },
+        "permanent": {
+          "type": "boolean",
+          "description": "Use 301 (true) or 302 (false) status code"
         }
       }
     },
