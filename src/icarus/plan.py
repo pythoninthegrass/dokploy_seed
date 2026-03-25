@@ -6,7 +6,9 @@ from icarus.payloads import (
     DATABASE_DEFAULTS,
     build_mount_payload,
     build_port_payload,
+    build_redirect_payload,
     build_schedule_payload,
+    build_security_payload,
     is_compose,
 )
 from icarus.schema import get_state_file
@@ -159,6 +161,34 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
                         "attrs": {
                             "cronExpression": sched["cronExpression"],
                             "command": sched["command"],
+                        },
+                    }
+                )
+
+            for sec in app_def.get("security", []):
+                changes.append(
+                    {
+                        "action": "create",
+                        "resource_type": "security",
+                        "name": sec["username"],
+                        "parent": name,
+                        "attrs": {
+                            "username": sec["username"],
+                        },
+                    }
+                )
+
+            for redir in app_def.get("redirects", []):
+                changes.append(
+                    {
+                        "action": "create",
+                        "resource_type": "redirect",
+                        "name": redir["regex"],
+                        "parent": name,
+                        "attrs": {
+                            "regex": redir["regex"],
+                            "replacement": redir["replacement"],
+                            "permanent": redir["permanent"],
                         },
                     }
                 )
@@ -466,6 +496,107 @@ def _plan_redeploy(
                             "name": f"{pub_port} -> {ex.get('targetPort', '?')}",
                             "parent": name,
                             "attrs": {"publishedPort": pub_port},
+                        }
+                    )
+
+        security_cfg = app_def.get("security")
+        if security_cfg is not None or "security" in state["apps"].get(name, {}):
+            remote_security = remote.get("security") or []
+            desired_security = security_cfg or []
+
+            existing_by_user = {s["username"]: s for s in remote_security}
+            desired_by_user = {s["username"]: s for s in desired_security}
+
+            for username, sec in desired_by_user.items():
+                if username in existing_by_user:
+                    ex = existing_by_user[username]
+                    diffs: dict = {}
+                    if sec.get("password") != ex.get("password"):
+                        diffs["password"] = (ex.get("password"), sec.get("password"))
+                    if diffs:
+                        changes.append(
+                            {
+                                "action": "update",
+                                "resource_type": "security",
+                                "name": username,
+                                "parent": name,
+                                "attrs": diffs,
+                            }
+                        )
+                else:
+                    changes.append(
+                        {
+                            "action": "create",
+                            "resource_type": "security",
+                            "name": username,
+                            "parent": name,
+                            "attrs": {"username": username},
+                        }
+                    )
+
+            for username in existing_by_user:
+                if username not in desired_by_user:
+                    changes.append(
+                        {
+                            "action": "destroy",
+                            "resource_type": "security",
+                            "name": username,
+                            "parent": name,
+                            "attrs": {"username": username},
+                        }
+                    )
+
+        redirects_cfg = app_def.get("redirects")
+        if redirects_cfg is not None or "redirects" in state["apps"].get(name, {}):
+            remote_redirects = remote.get("redirects") or []
+            desired_redirects = redirects_cfg or []
+            existing_by_regex = {r["regex"]: r for r in remote_redirects}
+            desired_by_regex = {r["regex"]: r for r in desired_redirects}
+
+            for regex, redir in desired_by_regex.items():
+                payload = build_redirect_payload(app_info["applicationId"], redir)
+                if regex in existing_by_regex:
+                    ex = existing_by_regex[regex]
+                    diffs: dict = {}
+                    for key in ("replacement", "permanent"):
+                        old_val = ex.get(key)
+                        new_val = payload.get(key)
+                        if old_val != new_val:
+                            diffs[key] = (old_val, new_val)
+                    if diffs:
+                        changes.append(
+                            {
+                                "action": "update",
+                                "resource_type": "redirect",
+                                "name": regex,
+                                "parent": name,
+                                "attrs": diffs,
+                            }
+                        )
+                else:
+                    changes.append(
+                        {
+                            "action": "create",
+                            "resource_type": "redirect",
+                            "name": regex,
+                            "parent": name,
+                            "attrs": {
+                                "regex": regex,
+                                "replacement": redir["replacement"],
+                                "permanent": redir["permanent"],
+                            },
+                        }
+                    )
+
+            for regex, ex in existing_by_regex.items():
+                if regex not in desired_by_regex:
+                    changes.append(
+                        {
+                            "action": "destroy",
+                            "resource_type": "redirect",
+                            "name": regex,
+                            "parent": name,
+                            "attrs": {"regex": regex},
                         }
                     )
 

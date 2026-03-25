@@ -53,6 +53,13 @@ apps:
   - name: web
     source: github
     autoDeploy: true
+    redirects:
+      - regex: "^/blog$"
+        replacement: "https://blog.example.com"
+        permanent: true
+      - regex: "^/docs/(.*)"
+        replacement: "/documentation/$1"
+        permanent: false
 
   - name: worker
     source: github

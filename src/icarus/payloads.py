@@ -216,6 +216,26 @@ def resolve_registry_id(state: dict, registry_name: str) -> str | None:
     return state.get("registries", {}).get(registry_name, {}).get("registryId")
 
 
+def build_security_payload(app_id: str, sec: dict) -> dict:
+    """Build payload for security.create."""
+    return {
+        "applicationId": app_id,
+        "username": sec["username"],
+        "password": sec["password"],
+    }
+
+
+def build_redirect_payload(app_id: str, redirect: dict) -> dict:
+    """Build payload for redirects.create."""
+    return {
+        "applicationId": app_id,
+        "regex": redirect["regex"],
+        "replacement": redirect["replacement"],
+        "permanent": redirect["permanent"],
+    }
+
+
+
 def build_schedule_payload(app_id: str, sched: dict) -> dict:
     """Build payload for schedule.create."""
     payload = {

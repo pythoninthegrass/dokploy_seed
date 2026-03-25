@@ -7,9 +7,11 @@ from icarus.payloads import (
     build_domain_payload,
     build_mount_payload,
     build_port_payload,
+    build_redirect_payload,
     build_registry_create_payload,
     build_registry_update_payload,
     build_schedule_payload,
+    build_security_payload,
     is_compose,
     resolve_registry_id,
 )
@@ -197,6 +199,73 @@ def reconcile_app_ports(
         desired = ports or []
         new_state = reconcile_ports(client, app_id, existing, desired)
         state["apps"][name]["ports"] = new_state
+        changed = True
+    if changed:
+        save_state(state, state_file)
+
+
+def reconcile_redirects(
+    client: DokployClient,
+    app_id: str,
+    existing: list[dict],
+    desired: list[dict],
+) -> dict:
+    """Reconcile redirects: update existing by regex, create new, delete removed.
+
+    Returns a dict mapping regex -> {"redirectId": ...} for state storage.
+    """
+    existing_by_regex = {r["regex"]: r for r in existing}
+    desired_by_regex = {r["regex"]: r for r in desired}
+
+    result_state = {}
+
+    for regex, redir in desired_by_regex.items():
+        payload = build_redirect_payload(app_id, redir)
+        if regex in existing_by_regex:
+            ex = existing_by_regex[regex]
+            redirect_id = ex["redirectId"]
+            needs_update = any(payload.get(key) != ex.get(key) for key in ("replacement", "permanent"))
+            if needs_update:
+                update_payload = {
+                    "redirectId": redirect_id,
+                    "regex": payload["regex"],
+                    "replacement": payload["replacement"],
+                    "permanent": payload["permanent"],
+                }
+                client.post("redirects.update", update_payload)
+            result_state[regex] = {"redirectId": redirect_id}
+        else:
+            resp = client.post("redirects.create", payload)
+            result_state[regex] = {"redirectId": resp["redirectId"]}
+
+    for regex, ex in existing_by_regex.items():
+        if regex not in desired_by_regex:
+            client.post("redirects.delete", {"redirectId": ex["redirectId"]})
+
+    return result_state
+
+
+def reconcile_app_redirects(
+    client: DokployClient,
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+) -> None:
+    """Reconcile redirects for all apps on redeploy."""
+    changed = False
+    for app_def in cfg.get("apps", []):
+        if is_compose(app_def):
+            continue
+        redirects = app_def.get("redirects")
+        name = app_def["name"]
+        if redirects is None and "redirects" not in state["apps"].get(name, {}):
+            continue
+        app_id = state["apps"][name]["applicationId"]
+        remote = client.get("application.one", {"applicationId": app_id})
+        existing = remote.get("redirects") or []
+        desired = redirects or []
+        new_state = reconcile_redirects(client, app_id, existing, desired)
+        state["apps"][name]["redirects"] = new_state
         changed = True
     if changed:
         save_state(state, state_file)
@@ -392,3 +461,69 @@ def reconcile_app_registry(
 
         if current_registry_id != desired_registry_id:
             client.post("application.update", {"applicationId": app_id, "registryId": desired_registry_id})
+
+
+def reconcile_security(
+    client: DokployClient,
+    app_id: str,
+    existing: list[dict],
+    desired: list[dict],
+) -> dict:
+    """Reconcile security: update existing by username, create new, delete removed.
+
+    Returns a dict mapping username -> {"securityId": ...} for state storage.
+    """
+    existing_by_user = {s["username"]: s for s in existing}
+    desired_by_user = {s["username"]: s for s in desired}
+
+    result_state = {}
+
+    for username, sec in desired_by_user.items():
+        payload = build_security_payload(app_id, sec)
+        if username in existing_by_user:
+            ex = existing_by_user[username]
+            security_id = ex["securityId"]
+            needs_update = payload.get("password") != ex.get("password")
+            if needs_update:
+                update_payload = {
+                    "securityId": security_id,
+                    "username": payload["username"],
+                    "password": payload["password"],
+                }
+                client.post("security.update", update_payload)
+            result_state[username] = {"securityId": security_id}
+        else:
+            resp = client.post("security.create", payload)
+            result_state[username] = {"securityId": resp["securityId"]}
+
+    for username, ex in existing_by_user.items():
+        if username not in desired_by_user:
+            client.post("security.delete", {"securityId": ex["securityId"]})
+
+    return result_state
+
+
+def reconcile_app_security(
+    client: DokployClient,
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+) -> None:
+    """Reconcile security for all apps on redeploy."""
+    changed = False
+    for app_def in cfg.get("apps", []):
+        if is_compose(app_def):
+            continue
+        security = app_def.get("security")
+        name = app_def["name"]
+        if security is None and "security" not in state["apps"].get(name, {}):
+            continue
+        app_id = state["apps"][name]["applicationId"]
+        remote = client.get("application.one", {"applicationId": app_id})
+        existing = remote.get("security") or []
+        desired = security or []
+        new_state = reconcile_security(client, app_id, existing, desired)
+        state["apps"][name]["security"] = new_state
+        changed = True
+    if changed:
+        save_state(state, state_file)

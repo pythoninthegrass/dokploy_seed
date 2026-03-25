@@ -1,0 +1,15 @@
+project:
+  name: my-secured-app
+  description: "App with basic auth security\n"
+  deploy_order:
+    - - web
+
+apps:
+  - name: web
+    source: docker
+    dockerImage: nginx:alpine
+    security:
+      - username: admin
+        password: s3cret
+      - username: deploy
+        password: d3pl0y

@@ -199,6 +199,20 @@
                 "registry": {
                   "type": "string",
                   "description": "Registry name override"
+                },
+                "security": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/security_entry"
+                  },
+                  "description": "Basic auth credentials override"
+                },
+                "redirects": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/redirect"
+                  },
+                  "description": "URL redirects (regex-based 301/302)"
                 }
               }
             }
@@ -345,6 +359,20 @@
           "registry": {
             "type": "string",
             "description": "Registry name (from registries section) for Docker image pulls"
+          },
+          "security": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/security_entry"
+            },
+            "description": "Basic auth credentials for the application"
+          },
+          "redirects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/redirect"
+            },
+            "description": "URL redirects (regex-based 301/302)"
           }
         },
         "if": {
@@ -478,6 +506,51 @@
           "type": "boolean",
           "default": true,
           "description": "Whether the schedule is active (default: true)"
+        }
+      }
+    },
+    "security_entry": {
+      "type": "object",
+      "required": [
+        "username",
+        "password"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Basic auth username"
+        },
+        "password": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Basic auth password"
+        }
+      }
+    },
+    "redirect": {
+      "type": "object",
+      "required": [
+        "regex",
+        "replacement",
+        "permanent"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "regex": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Regex pattern to match incoming URL paths"
+        },
+        "replacement": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Replacement URL or path (supports regex capture groups)"
+        },
+        "permanent": {
+          "type": "boolean",
+          "description": "Use 301 (true) or 302 (false) status code"
         }
       }
     },
