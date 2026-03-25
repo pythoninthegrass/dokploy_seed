@@ -3952,3 +3952,378 @@ class TestComputePlanDatabases:
 
         db_creates = [c for c in changes if c["resource_type"] == "database"]
         assert len(db_creates) == 0
+
+
+class TestBuildSecurityPayload:
+    def test_payload_structure(self):
+        result = dokploy.build_security_payload("app-1", {"username": "admin", "password": "s3cret"})
+        assert result == {
+            "applicationId": "app-1",
+            "username": "admin",
+            "password": "s3cret",
+        }
+
+
+class TestSecurityReconciliation:
+    def test_reconcile_creates_new_deletes_removed_updates_existing(self):
+        """reconcile_security creates new, updates changed, deletes removed."""
+        existing = [
+            {"securityId": "s1", "username": "admin", "password": "old-pass"},
+            {"securityId": "s2", "username": "removed-user", "password": "gone"},
+        ]
+        desired = [
+            {"username": "admin", "password": "new-pass"},
+            {"username": "deploy", "password": "d3pl0y"},
+        ]
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "security.create": {"securityId": "s3"},
+        }.get(endpoint, {})
+
+        result = dokploy.reconcile_security(client, "app-1", existing, desired)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "security.update"]
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["securityId"] == "s1"
+        assert update_calls[0][0][1]["username"] == "admin"
+        assert update_calls[0][0][1]["password"] == "new-pass"
+
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "security.delete"]
+        assert len(delete_calls) == 1
+        assert delete_calls[0][0][1]["securityId"] == "s2"
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "security.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["username"] == "deploy"
+
+        assert "admin" in result
+        assert result["admin"]["securityId"] == "s1"
+        assert "deploy" in result
+        assert result["deploy"]["securityId"] == "s3"
+        assert "removed-user" not in result
+
+    def test_reconcile_no_changes(self):
+        """reconcile_security does nothing when desired matches existing."""
+        existing = [
+            {"securityId": "s1", "username": "admin", "password": "s3cret"},
+        ]
+        desired = [
+            {"username": "admin", "password": "s3cret"},
+        ]
+        client = MagicMock()
+        dokploy.reconcile_security(client, "app-1", existing, desired)
+
+        assert len(client.post.call_args_list) == 0
+
+    def test_reconcile_all_removed(self):
+        """reconcile_security deletes all when desired is empty."""
+        existing = [
+            {"securityId": "s1", "username": "admin", "password": "s3cret"},
+            {"securityId": "s2", "username": "deploy", "password": "d3pl0y"},
+        ]
+        desired = []
+        client = MagicMock()
+
+        result = dokploy.reconcile_security(client, "app-1", existing, desired)
+
+        delete_calls = [c for c in client.post.call_args_list if c[0][0] == "security.delete"]
+        assert len(delete_calls) == 2
+        assert result == {}
+
+
+class TestReconcileAppSecurity:
+    def test_fetches_security_from_application_one(self, tmp_path):
+        """reconcile_app_security fetches remote security and reconciles."""
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"web": {"applicationId": "app-1", "appName": "web"}},
+        }
+        state_file.write_text(json.dumps(state))
+
+        cfg = {
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "security": [{"username": "admin", "password": "s3cret"}],
+                }
+            ]
+        }
+
+        client = MagicMock()
+        client.get.return_value = {"security": []}
+        client.post.return_value = {"securityId": "s1"}
+
+        dokploy.reconcile_app_security(client, cfg, state, state_file)
+
+        client.get.assert_called_once_with("application.one", {"applicationId": "app-1"})
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "security.create"]
+        assert len(create_calls) == 1
+
+        saved = json.loads(state_file.read_text())
+        assert "security" in saved["apps"]["web"]
+        assert "admin" in saved["apps"]["web"]["security"]
+
+    def test_skips_compose_apps(self, tmp_path):
+        """reconcile_app_security skips compose apps."""
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"web": {"composeId": "comp-1", "appName": "web", "source": "compose"}},
+        }
+        state_file.write_text(json.dumps(state))
+
+        cfg = {"apps": [{"name": "web", "source": "compose", "composeFile": "docker-compose.yml"}]}
+
+        client = MagicMock()
+        dokploy.reconcile_app_security(client, cfg, state, state_file)
+
+        client.get.assert_not_called()
+
+    def test_no_security_skips(self, tmp_path):
+        """reconcile_app_security skips apps without security config or state."""
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"web": {"applicationId": "app-1", "appName": "web"}},
+        }
+        state_file.write_text(json.dumps(state))
+
+        cfg = {"apps": [{"name": "web", "source": "docker", "dockerImage": "nginx:alpine"}]}
+
+        client = MagicMock()
+        dokploy.reconcile_app_security(client, cfg, state, state_file)
+
+        client.get.assert_not_called()
+
+
+class TestCmdSetupSecurity:
+    def test_security_create_calls(self, tmp_path):
+        """cmd_setup creates security entries and stores securityId in state."""
+        cfg = {
+            "project": {"name": "test", "description": "test", "deploy_order": [["web"]]},
+            "apps": [
+                {
+                    "name": "web",
+                    "source": "docker",
+                    "dockerImage": "nginx:alpine",
+                    "security": [
+                        {"username": "admin", "password": "s3cret"},
+                        {"username": "deploy", "password": "d3pl0y"},
+                    ],
+                }
+            ],
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+
+        call_count = {"n": 0}
+
+        def mock_post(endpoint, payload):
+            if endpoint == "project.create":
+                return {
+                    "project": {"projectId": "proj-1"},
+                    "environment": {"environmentId": "env-1"},
+                }
+            if endpoint == "application.create":
+                return {"applicationId": "app-1", "appName": "web"}
+            if endpoint == "security.create":
+                call_count["n"] += 1
+                return {"securityId": f"sec-{call_count['n']}"}
+            return {}
+
+        client = MagicMock()
+        client.post.side_effect = mock_post
+
+        dokploy.cmd_setup(client, cfg, state_file)
+
+        security_calls = [c for c in client.post.call_args_list if c[0][0] == "security.create"]
+        assert len(security_calls) == 2
+        assert security_calls[0][0][1]["username"] == "admin"
+        assert security_calls[1][0][1]["username"] == "deploy"
+
+        saved = json.loads(state_file.read_text())
+        assert "security" in saved["apps"]["web"]
+        assert saved["apps"]["web"]["security"]["admin"]["securityId"] == "sec-1"
+        assert saved["apps"]["web"]["security"]["deploy"]["securityId"] == "sec-2"
+
+    def test_no_security_skips(self, tmp_path):
+        """cmd_setup skips security when not configured."""
+        cfg = {
+            "project": {"name": "test", "description": "test", "deploy_order": [["web"]]},
+            "apps": [{"name": "web", "source": "docker", "dockerImage": "nginx:alpine"}],
+        }
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+
+        client = MagicMock()
+        client.post.side_effect = lambda endpoint, payload: {
+            "project.create": {
+                "project": {"projectId": "proj-1"},
+                "environment": {"environmentId": "env-1"},
+            },
+            "application.create": {"applicationId": "app-1", "appName": "web"},
+        }.get(endpoint, {})
+
+        dokploy.cmd_setup(client, cfg, state_file)
+
+        security_calls = [c for c in client.post.call_args_list if c[0][0] == "security.create"]
+        assert len(security_calls) == 0
+
+
+class TestCmdApplyReconcileSecurity:
+    def test_redeploy_calls_reconcile_app_security(self, tmp_path, monkeypatch):
+        """cmd_apply calls reconcile_app_security on redeploy."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text("{}")
+
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(icarus_commands, "validate_state", lambda client, state: True)
+        monkeypatch.setattr(icarus_commands, "cleanup_stale_routes", lambda state, cfg: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_domains", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_schedules", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_mounts", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_ports", lambda client, cfg, state, sf: None)
+        monkeypatch.setattr(icarus_commands, "reconcile_app_settings", lambda client, cfg, state: None)
+        monkeypatch.setattr(
+            icarus_commands,
+            "reconcile_app_security",
+            lambda client, cfg, state, sf: calls.append("reconcile_app_security"),
+        )
+
+        dokploy.cmd_apply(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "reconcile_app_security" in calls
+
+    def test_fresh_deploy_does_not_call_reconcile_app_security(self, tmp_path, monkeypatch):
+        """cmd_apply does NOT call reconcile_app_security on fresh deploy."""
+        calls = []
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+
+        monkeypatch.setattr(icarus_commands, "cmd_check", lambda repo_root: None)
+        monkeypatch.setattr(icarus_commands, "cmd_setup", lambda client, cfg, sf, repo_root=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_env", lambda client, cfg, sf, repo_root, env_file_override=None: None)
+        monkeypatch.setattr(icarus_commands, "cmd_trigger", lambda client, cfg, sf, redeploy=False: None)
+        monkeypatch.setattr(
+            icarus_commands,
+            "reconcile_app_security",
+            lambda client, cfg, state, sf: calls.append("reconcile_app_security"),
+        )
+
+        dokploy.cmd_apply(
+            repo_root=tmp_path,
+            client="fake-client",
+            cfg={"project": {}},
+            state_file=state_file,
+        )
+
+        assert "reconcile_app_security" not in calls
+
+
+class TestComputePlanSecurity:
+    def _mock_client(self):
+        client = MagicMock()
+        client.get = MagicMock(return_value=[])
+        return client
+
+    def test_plan_initial_shows_security_creates(self, tmp_path, security_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._mock_client()
+
+        changes = dokploy.compute_plan(client, security_config, state_file, tmp_path)
+
+        sec_creates = [c for c in changes if c["resource_type"] == "security"]
+        assert len(sec_creates) == 2
+        usernames = {c["name"] for c in sec_creates}
+        assert usernames == {"admin", "deploy"}
+        assert all(c["action"] == "create" for c in sec_creates)
+        assert all(c["parent"] == "web" for c in sec_creates)
+
+    def test_plan_no_security_no_changes(self, tmp_path, minimal_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._mock_client()
+
+        changes = dokploy.compute_plan(client, minimal_config, state_file, tmp_path)
+
+        sec_creates = [c for c in changes if c["resource_type"] == "security"]
+        assert len(sec_creates) == 0
+
+    def test_plan_redeploy_shows_security_changes(self, tmp_path, security_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state = {
+            "projectId": "proj-1",
+            "environmentId": "env-1",
+            "apps": {"web": {"applicationId": "app-1", "appName": "web"}},
+        }
+        state_file.write_text(json.dumps(state))
+
+        client = MagicMock()
+
+        def mock_get(endpoint, params=None):
+            if endpoint == "project.all":
+                return [{"projectId": "proj-1"}]
+            if endpoint == "application.one":
+                return {
+                    "applicationId": "app-1",
+                    "security": [
+                        {"securityId": "s1", "username": "admin", "password": "old-pass"},
+                        {"securityId": "s2", "username": "removed-user", "password": "gone"},
+                    ],
+                }
+            return []
+
+        client.get.side_effect = mock_get
+
+        changes = dokploy.compute_plan(client, security_config, state_file, tmp_path)
+
+        sec_changes = [c for c in changes if c["resource_type"] == "security"]
+        actions = {c["action"] for c in sec_changes}
+        assert "create" in actions
+        assert "update" in actions
+        assert "destroy" in actions
+
+        created = [c for c in sec_changes if c["action"] == "create"]
+        assert len(created) == 1
+        assert created[0]["name"] == "deploy"
+
+        updated = [c for c in sec_changes if c["action"] == "update"]
+        assert len(updated) == 1
+        assert updated[0]["name"] == "admin"
+        assert "password" in updated[0]["attrs"]
+
+        destroyed = [c for c in sec_changes if c["action"] == "destroy"]
+        assert len(destroyed) == 1
+        assert destroyed[0]["name"] == "removed-user"
+
+
+class TestSecuritySchemaValidation:
+    def test_security_config_valid(self, security_config):
+        """Security config fixture loads and validates."""
+        assert "apps" in security_config
+        assert len(security_config["apps"]) == 1
+        app = security_config["apps"][0]
+        assert "security" in app
+        assert len(app["security"]) == 2
+
+    def test_security_parsed_correctly(self, security_config):
+        app = security_config["apps"][0]
+        usernames = {s["username"] for s in app["security"]}
+        assert usernames == {"admin", "deploy"}
