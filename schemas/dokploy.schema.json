@@ -196,6 +196,13 @@
                   },
                   "description": "Cron jobs that run commands inside the app container"
                 },
+                "security": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/security_entry"
+                  },
+                  "description": "Basic auth credentials override"
+                },
                 "redirects": {
                   "type": "array",
                   "items": {
@@ -345,6 +352,13 @@
             },
             "description": "Cron jobs that run commands inside the app container"
           },
+          "security": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/security_entry"
+            },
+            "description": "Basic auth credentials for the application"
+          },
           "redirects": {
             "type": "array",
             "items": {
@@ -477,6 +491,26 @@
           "type": "boolean",
           "default": true,
           "description": "Whether the schedule is active (default: true)"
+        }
+      }
+    },
+    "security_entry": {
+      "type": "object",
+      "required": [
+        "username",
+        "password"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Basic auth username"
+        },
+        "password": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Basic auth password"
         }
       }
     },

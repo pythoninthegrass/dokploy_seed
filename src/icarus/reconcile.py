@@ -9,6 +9,7 @@ from icarus.payloads import (
     build_port_payload,
     build_redirect_payload,
     build_schedule_payload,
+    build_security_payload,
     is_compose,
 )
 from pathlib import Path
@@ -400,3 +401,69 @@ def reconcile_app_settings(
 
         if changed:
             client.post("application.update", update_payload)
+
+
+def reconcile_security(
+    client: DokployClient,
+    app_id: str,
+    existing: list[dict],
+    desired: list[dict],
+) -> dict:
+    """Reconcile security: update existing by username, create new, delete removed.
+
+    Returns a dict mapping username -> {"securityId": ...} for state storage.
+    """
+    existing_by_user = {s["username"]: s for s in existing}
+    desired_by_user = {s["username"]: s for s in desired}
+
+    result_state = {}
+
+    for username, sec in desired_by_user.items():
+        payload = build_security_payload(app_id, sec)
+        if username in existing_by_user:
+            ex = existing_by_user[username]
+            security_id = ex["securityId"]
+            needs_update = payload.get("password") != ex.get("password")
+            if needs_update:
+                update_payload = {
+                    "securityId": security_id,
+                    "username": payload["username"],
+                    "password": payload["password"],
+                }
+                client.post("security.update", update_payload)
+            result_state[username] = {"securityId": security_id}
+        else:
+            resp = client.post("security.create", payload)
+            result_state[username] = {"securityId": resp["securityId"]}
+
+    for username, ex in existing_by_user.items():
+        if username not in desired_by_user:
+            client.post("security.delete", {"securityId": ex["securityId"]})
+
+    return result_state
+
+
+def reconcile_app_security(
+    client: DokployClient,
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+) -> None:
+    """Reconcile security for all apps on redeploy."""
+    changed = False
+    for app_def in cfg.get("apps", []):
+        if is_compose(app_def):
+            continue
+        security = app_def.get("security")
+        name = app_def["name"]
+        if security is None and "security" not in state["apps"].get(name, {}):
+            continue
+        app_id = state["apps"][name]["applicationId"]
+        remote = client.get("application.one", {"applicationId": app_id})
+        existing = remote.get("security") or []
+        desired = security or []
+        new_state = reconcile_security(client, app_id, existing, desired)
+        state["apps"][name]["security"] = new_state
+        changed = True
+    if changed:
+        save_state(state, state_file)

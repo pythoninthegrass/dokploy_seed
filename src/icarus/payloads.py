@@ -186,6 +186,15 @@ def build_port_payload(app_id: str, port: dict) -> dict:
     }
 
 
+def build_security_payload(app_id: str, sec: dict) -> dict:
+    """Build payload for security.create."""
+    return {
+        "applicationId": app_id,
+        "username": sec["username"],
+        "password": sec["password"],
+    }
+
+
 def build_redirect_payload(app_id: str, redirect: dict) -> dict:
     """Build payload for redirects.create."""
     return {

@@ -34,6 +34,7 @@ from icarus.payloads import (
     build_port_payload,
     build_redirect_payload,
     build_schedule_payload,
+    build_security_payload,
     database_endpoint,
     database_id_key,
     is_compose,
@@ -54,12 +55,14 @@ from icarus.reconcile import (
     reconcile_app_ports,
     reconcile_app_redirects,
     reconcile_app_schedules,
+    reconcile_app_security,
     reconcile_app_settings,
     reconcile_domains,
     reconcile_mounts,
     reconcile_ports,
     reconcile_redirects,
     reconcile_schedules,
+    reconcile_security,
 )
 from icarus.schema import (
     get_state_file,

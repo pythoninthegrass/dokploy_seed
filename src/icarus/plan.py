@@ -8,6 +8,7 @@ from icarus.payloads import (
     build_port_payload,
     build_redirect_payload,
     build_schedule_payload,
+    build_security_payload,
     is_compose,
 )
 from icarus.schema import get_state_file
@@ -144,6 +145,19 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
                         "attrs": {
                             "cronExpression": sched["cronExpression"],
                             "command": sched["command"],
+                        },
+                    }
+                )
+
+            for sec in app_def.get("security", []):
+                changes.append(
+                    {
+                        "action": "create",
+                        "resource_type": "security",
+                        "name": sec["username"],
+                        "parent": name,
+                        "attrs": {
+                            "username": sec["username"],
                         },
                     }
                 )
@@ -466,6 +480,53 @@ def _plan_redeploy(
                             "name": f"{pub_port} -> {ex.get('targetPort', '?')}",
                             "parent": name,
                             "attrs": {"publishedPort": pub_port},
+                        }
+                    )
+
+        security_cfg = app_def.get("security")
+        if security_cfg is not None or "security" in state["apps"].get(name, {}):
+            remote_security = remote.get("security") or []
+            desired_security = security_cfg or []
+
+            existing_by_user = {s["username"]: s for s in remote_security}
+            desired_by_user = {s["username"]: s for s in desired_security}
+
+            for username, sec in desired_by_user.items():
+                if username in existing_by_user:
+                    ex = existing_by_user[username]
+                    diffs: dict = {}
+                    if sec.get("password") != ex.get("password"):
+                        diffs["password"] = (ex.get("password"), sec.get("password"))
+                    if diffs:
+                        changes.append(
+                            {
+                                "action": "update",
+                                "resource_type": "security",
+                                "name": username,
+                                "parent": name,
+                                "attrs": diffs,
+                            }
+                        )
+                else:
+                    changes.append(
+                        {
+                            "action": "create",
+                            "resource_type": "security",
+                            "name": username,
+                            "parent": name,
+                            "attrs": {"username": username},
+                        }
+                    )
+
+            for username in existing_by_user:
+                if username not in desired_by_user:
+                    changes.append(
+                        {
+                            "action": "destroy",
+                            "resource_type": "security",
+                            "name": username,
+                            "parent": name,
+                            "attrs": {"username": username},
                         }
                     )
 

@@ -23,6 +23,7 @@ from icarus.payloads import (
     build_port_payload,
     build_redirect_payload,
     build_schedule_payload,
+    build_security_payload,
     database_endpoint,
     database_id_key,
     is_compose,
@@ -36,6 +37,7 @@ from icarus.reconcile import (
     reconcile_app_ports,
     reconcile_app_redirects,
     reconcile_app_schedules,
+    reconcile_app_security,
     reconcile_app_settings,
 )
 from icarus.ssh import (
@@ -378,6 +380,23 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
             resp = client.post("schedule.create", sched_payload)
             state["apps"][name]["schedules"][sched["name"]] = {"scheduleId": resp["scheduleId"]}
 
+    # 11. Security (basic auth)
+    for app_def in cfg["apps"]:
+        if is_compose(app_def):
+            continue
+        security = app_def.get("security")
+        if not security:
+            continue
+        name = app_def["name"]
+        app_id = state["apps"][name]["applicationId"]
+        state["apps"][name]["security"] = {}
+        for sec in security:
+            print(f"Creating security for {name}: {sec['username']}...")
+            sec_payload = build_security_payload(app_id, sec)
+            resp = client.post("security.create", sec_payload)
+            state["apps"][name]["security"][sec["username"]] = {"securityId": resp["securityId"]}
+
+    # 12. Databases
     # 11. Redirects
     for app_def in cfg["apps"]:
         if is_compose(app_def):
@@ -568,6 +587,7 @@ def cmd_apply(
         reconcile_app_schedules(client, cfg, load_state(state_file), state_file)
         reconcile_app_mounts(client, cfg, load_state(state_file), state_file)
         reconcile_app_ports(client, cfg, load_state(state_file), state_file)
+        reconcile_app_security(client, cfg, load_state(state_file), state_file)
         reconcile_app_redirects(client, cfg, load_state(state_file), state_file)
         reconcile_app_settings(client, cfg, load_state(state_file))
 

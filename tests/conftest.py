@@ -86,6 +86,12 @@ def database_config():
 
 
 @pytest.fixture
+def security_config():
+    """Config with basic auth security entries."""
+    return _load_fixture("security_config.yml")
+
+
+@pytest.fixture
 def dokploy_yml(tmp_path, minimal_config):
     """Write a minimal dokploy.yml in tmp_path and return the path."""
     config_file = tmp_path / "dokploy.yml"
