@@ -1,27 +1,49 @@
 import httpx
 import json
 import sys
+import time
 from pathlib import Path
 
 
 class DokployClient:
     """Thin httpx wrapper for Dokploy API."""
 
-    def __init__(self, base_url: str, api_key: str) -> None:
+    def __init__(self, base_url: str, api_key: str, max_retries: int = 3) -> None:
+        self.max_retries = max_retries
         self.client = httpx.Client(
             base_url=base_url.rstrip("/"),
             headers={"x-api-key": api_key},
             timeout=60.0,
         )
 
+    def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
+        """Send an HTTP request with retry on 429/5xx and exponential backoff."""
+        url = f"/api/{path}"
+        last_exc: httpx.HTTPStatusError | None = None
+        for attempt in range(self.max_retries + 1):
+            resp = self.client.request(method, url, **kwargs)
+            if resp.status_code < 400:
+                return resp
+            if resp.status_code == 429 or resp.status_code >= 500:
+                last_exc = httpx.HTTPStatusError(
+                    message=f"{resp.status_code} {resp.reason_phrase}",
+                    request=resp.request,
+                    response=resp,
+                )
+                if attempt < self.max_retries:
+                    time.sleep(2**attempt)
+                    continue
+                raise last_exc
+            # Non-retryable 4xx — fail immediately
+            resp.raise_for_status()
+        raise last_exc  # type: ignore[misc]
+
     def get(self, path: str, params: dict | None = None) -> dict | list:
-        resp = self.client.get(f"/api/{path}", params=params)
-        resp.raise_for_status()
+        resp = self._request("GET", path, params=params)
         return resp.json()
 
     def post(self, path: str, payload: dict | None = None) -> dict:
-        resp = self.client.post(f"/api/{path}", json=payload or {})
-        resp.raise_for_status()
+        resp = self._request("POST", path, json=payload or {})
         if not resp.content:
             return {}
         return resp.json()
