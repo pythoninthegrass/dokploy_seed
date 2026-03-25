@@ -1,10 +1,10 @@
 ---
 id: TASK-022
 title: Add basic auth / security support
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-03-23 18:05'
-updated_date: '2026-03-25 18:08'
+updated_date: '2026-03-25 18:03'
 labels:
   - gap-analysis
   - new-resource
@@ -14,7 +14,7 @@ references:
   - main.py
   - schemas/dokploy.schema.json
 priority: medium
-ordinal: 7000
+ordinal: 1000
 ---
 
 ## Description
@@ -25,13 +25,7 @@ The TF provider can configure basic authentication (username/password) on applic
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 Apps can declare basic auth in dokploy.yml (username, password)
-- [x] #2 Security config is applied during setup
-- [x] #3 Security config is reconciled on apply/redeploy
+- [ ] #1 Apps can declare basic auth in dokploy.yml (username, password)
+- [ ] #2 Security config is applied during setup
+- [ ] #3 Security config is reconciled on apply/redeploy
 <!-- AC:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-All three acceptance criteria were already implemented prior to this task being picked up. Security support includes: schema definition (security_entry with username/password), payload builder, setup-time creation, full reconciliation (create/update/delete by username), plan output, test fixture, and 16 passing unit tests.
-<!-- SECTION:FINAL_SUMMARY:END -->
