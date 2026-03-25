@@ -4,6 +4,9 @@ from icarus.client import save_state
 from icarus.env import resolve_refs
 from icarus.payloads import (
     build_app_settings_payload,
+    build_backup_create_payload,
+    build_destination_create_payload,
+    build_destination_update_payload,
     build_domain_payload,
     build_mount_payload,
     build_port_payload,
@@ -12,6 +15,7 @@ from icarus.payloads import (
     build_registry_update_payload,
     build_schedule_payload,
     build_security_payload,
+    database_id_key,
     is_compose,
     resolve_registry_id,
 )
@@ -525,5 +529,106 @@ def reconcile_app_security(
         new_state = reconcile_security(client, app_id, existing, desired)
         state["apps"][name]["security"] = new_state
         changed = True
+    if changed:
+        save_state(state, state_file)
+
+
+def reconcile_destinations(
+    client: DokployClient,
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+) -> None:
+    """Reconcile backup destinations: create missing, update existing."""
+    destinations_cfg = cfg.get("destinations", [])
+    if not destinations_cfg:
+        return
+
+    existing_destinations = client.get("destination.all")
+    existing_by_name = {d["name"]: d for d in existing_destinations}
+
+    if "destinations" not in state:
+        state["destinations"] = {}
+
+    for dest_def in destinations_cfg:
+        name = dest_def["name"]
+        if name in existing_by_name:
+            destination_id = existing_by_name[name]["destinationId"]
+            update_payload = build_destination_update_payload(destination_id, dest_def)
+            client.post("destination.update", update_payload)
+        else:
+            payload = build_destination_create_payload(dest_def)
+            resp = client.post("destination.create", payload)
+            destination_id = resp["destinationId"]
+        state["destinations"][name] = {"destinationId": destination_id}
+
+    save_state(state, state_file)
+
+
+def reconcile_database_backups(
+    client: DokployClient,
+    cfg: dict,
+    state: dict,
+    state_file: Path,
+) -> None:
+    """Reconcile backup schedules for all databases."""
+    changed = False
+    for db_def in cfg.get("database", []):
+        backups_cfg = db_def.get("backups")
+        name = db_def["name"]
+        db_type = db_def["type"]
+        if backups_cfg is None and "backups" not in state.get("database", {}).get(name, {}):
+            continue
+
+        db_info = state["database"][name]
+        id_key = database_id_key(db_type)
+        db_id = db_info[id_key]
+
+        existing = client.get("backup.all", {id_key: db_id})
+        if not isinstance(existing, list):
+            existing = []
+
+        desired = backups_cfg or []
+        existing_by_prefix = {b["prefix"]: b for b in existing}
+        desired_by_prefix = {b["prefix"]: b for b in desired}
+
+        result_state = {}
+        for prefix, backup_def in desired_by_prefix.items():
+            destination_id = state.get("destinations", {}).get(backup_def["destination"], {}).get("destinationId")
+            if prefix in existing_by_prefix:
+                ex = existing_by_prefix[prefix]
+                backup_id = ex["backupId"]
+                payload = build_backup_create_payload(
+                    backup_def,
+                    db_id=db_id,
+                    db_type=db_type,
+                    db_name=name,
+                    destination_id=destination_id,
+                )
+                needs_update = any(
+                    payload.get(k) != ex.get(k) for k in ("schedule", "enabled", "keepLatestCount", "destinationId")
+                )
+                if needs_update:
+                    update_payload = {**payload, "backupId": backup_id}
+                    client.post("backup.update", update_payload)
+                result_state[prefix] = {"backupId": backup_id}
+            else:
+                payload = build_backup_create_payload(
+                    backup_def,
+                    db_id=db_id,
+                    db_type=db_type,
+                    db_name=name,
+                    destination_id=destination_id,
+                )
+                resp = client.post("backup.create", payload)
+                result_state[prefix] = {"backupId": resp["backupId"]}
+
+        for prefix, ex in existing_by_prefix.items():
+            if prefix not in desired_by_prefix:
+                client.post("backup.delete", {"backupId": ex["backupId"]})
+
+        state["database"][name]["backups"] = result_state
+        changed = True
+
     if changed:
         save_state(state, state_file)

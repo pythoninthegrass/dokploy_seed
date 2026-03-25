@@ -235,6 +235,50 @@ def build_redirect_payload(app_id: str, redirect: dict) -> dict:
     }
 
 
+def build_destination_create_payload(dest_def: dict) -> dict:
+    """Build the API payload for creating a backup destination."""
+    return {
+        "name": dest_def["name"],
+        "accessKey": dest_def["accessKey"],
+        "secretAccessKey": dest_def["secretAccessKey"],
+        "bucket": dest_def["bucket"],
+        "region": dest_def["region"],
+        "endpoint": dest_def["endpoint"],
+    }
+
+
+def build_destination_update_payload(destination_id: str, dest_def: dict) -> dict:
+    """Build the API payload for updating a backup destination."""
+    return {
+        "destinationId": destination_id,
+        **build_destination_create_payload(dest_def),
+    }
+
+
+def build_backup_create_payload(
+    backup_def: dict,
+    *,
+    db_id: str,
+    db_type: str,
+    db_name: str,
+    destination_id: str,
+) -> dict:
+    """Build the API payload for creating a database backup schedule."""
+    id_key = database_id_key(db_type)
+    payload: dict = {
+        "schedule": backup_def["schedule"],
+        "prefix": backup_def["prefix"],
+        "enabled": backup_def.get("enabled", True),
+        "destinationId": destination_id,
+        "databaseType": db_type,
+        "database": db_name,
+        "backupType": "database",
+        id_key: db_id,
+    }
+    if "keepLatestCount" in backup_def:
+        payload["keepLatestCount"] = backup_def["keepLatestCount"]
+    return payload
+
 
 def build_schedule_payload(app_id: str, sched: dict) -> dict:
     """Build payload for schedule.create."""

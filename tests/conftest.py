@@ -98,6 +98,12 @@ def security_config():
 
 
 @pytest.fixture
+def backup_config():
+    """Config with backup destinations and database backup schedules."""
+    return _load_fixture("backup_config.yml")
+
+
+@pytest.fixture
 def dokploy_yml(tmp_path, minimal_config):
     """Write a minimal dokploy.yml in tmp_path and return the path."""
     config_file = tmp_path / "dokploy.yml"

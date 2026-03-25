@@ -15,8 +15,11 @@ from icarus.env import (
 from icarus.payloads import (
     DATABASE_DEFAULTS,
     build_app_settings_payload,
+    build_backup_create_payload,
     build_build_type_payload,
     build_database_create_payload,
+    build_destination_create_payload,
+    build_destination_update_payload,
     build_domain_payload,
     build_github_provider_payload,
     build_mount_payload,
@@ -43,6 +46,8 @@ from icarus.reconcile import (
     reconcile_app_schedules,
     reconcile_app_security,
     reconcile_app_settings,
+    reconcile_database_backups,
+    reconcile_destinations,
     reconcile_registries,
 )
 from icarus.ssh import (
@@ -242,6 +247,28 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
                 registry_id = resp["registryId"]
                 print(f"  Registry created: {registry_id}")
             state["registries"][name] = {"registryId": registry_id}
+
+    # 2.6 Backup destinations (server-level, idempotent)
+    destinations_cfg = cfg.get("destinations", [])
+    if destinations_cfg:
+        print("Resolving backup destinations...")
+        existing_destinations = client.get("destination.all")
+        existing_by_name = {d["name"]: d for d in existing_destinations}
+        state["destinations"] = {}
+        for dest_def in destinations_cfg:
+            name = dest_def["name"]
+            if name in existing_by_name:
+                destination_id = existing_by_name[name]["destinationId"]
+                print(f"  Destination '{name}' exists: {destination_id}, updating...")
+                update_payload = build_destination_update_payload(destination_id, dest_def)
+                client.post("destination.update", update_payload)
+            else:
+                print(f"  Creating destination: {name}...")
+                payload = build_destination_create_payload(dest_def)
+                resp = client.post("destination.create", payload)
+                destination_id = resp["destinationId"]
+                print(f"  Destination created: {destination_id}")
+            state["destinations"][name] = {"destinationId": destination_id}
 
     # 3. Create apps
     for app_def in cfg["apps"]:
@@ -468,7 +495,28 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
         print(f"  Deploying {name}...")
         client.post(database_endpoint(db_type, "deploy"), {id_key: db_id})
 
-    # 12. Save state
+        # Create backup schedules for this database
+        for backup_def in db_def.get("backups", []):
+            dest_name = backup_def["destination"]
+            dest_id = state.get("destinations", {}).get(dest_name, {}).get("destinationId")
+            if not dest_id:
+                print(f"ERROR: Backup for '{name}' references unknown destination '{dest_name}'")
+                sys.exit(1)
+            prefix = backup_def["prefix"]
+            print(f"  Creating backup schedule '{prefix}' for {name}...")
+            backup_payload = build_backup_create_payload(
+                backup_def,
+                db_id=db_id,
+                db_type=db_type,
+                db_name=name,
+                destination_id=dest_id,
+            )
+            backup_resp = client.post("backup.create", backup_payload)
+            if "backups" not in state["database"][name]:
+                state["database"][name]["backups"] = {}
+            state["database"][name]["backups"][prefix] = {"backupId": backup_resp["backupId"]}
+
+    # 13. Save state
     save_state(state, state_file)
     print("\nSetup complete!")
     print(f"  Project: {project_id}")
@@ -621,6 +669,7 @@ def cmd_apply(
     if is_redeploy:
         cleanup_stale_routes(load_state(state_file), cfg)
         reconcile_registries(client, cfg, load_state(state_file), state_file)
+        reconcile_destinations(client, cfg, load_state(state_file), state_file)
         reconcile_app_registry(client, cfg, load_state(state_file))
         reconcile_app_domains(client, cfg, load_state(state_file), state_file)
         reconcile_app_schedules(client, cfg, load_state(state_file), state_file)
@@ -629,6 +678,7 @@ def cmd_apply(
         reconcile_app_security(client, cfg, load_state(state_file), state_file)
         reconcile_app_redirects(client, cfg, load_state(state_file), state_file)
         reconcile_app_settings(client, cfg, load_state(state_file))
+        reconcile_database_backups(client, cfg, load_state(state_file), state_file)
 
     print("\n==> Phase 4/4: trigger")
     cmd_trigger(client, cfg, state_file, redeploy=is_redeploy)

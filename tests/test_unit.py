@@ -5191,9 +5191,8 @@ class TestRetryOnTransientErrors:
         router = respx.Router()
         route = router.get("/api/project.all").mock(return_value=httpx.Response(500))
         client = _make_retry_client(router, max_retries=3)
-        with patch("icarus.client.time.sleep"):
-            with pytest.raises(httpx.HTTPStatusError) as exc_info:
-                client.get("project.all")
+        with patch("icarus.client.time.sleep"), pytest.raises(httpx.HTTPStatusError) as exc_info:
+            client.get("project.all")
         assert exc_info.value.response.status_code == 500
         assert route.call_count == 4  # 1 initial + 3 retries
 
@@ -5202,9 +5201,8 @@ class TestRetryOnTransientErrors:
         router = respx.Router()
         route = router.get("/api/project.all").mock(return_value=httpx.Response(500))
         client = _make_retry_client(router, max_retries=1)
-        with patch("icarus.client.time.sleep"):
-            with pytest.raises(httpx.HTTPStatusError):
-                client.get("project.all")
+        with patch("icarus.client.time.sleep"), pytest.raises(httpx.HTTPStatusError):
+            client.get("project.all")
         assert route.call_count == 2
 
     def test_success_no_retry(self):
@@ -5217,3 +5215,385 @@ class TestRetryOnTransientErrors:
         assert result == []
         assert route.call_count == 1
         mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Backup destination payload tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildDestinationCreatePayload:
+    def test_required_fields(self):
+        dest_def = {
+            "name": "s3-backups",
+            "accessKey": "AKIAIOSFODNN7EXAMPLE",
+            "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            "bucket": "my-backups",
+            "region": "us-east-1",
+            "endpoint": "https://s3.amazonaws.com",
+        }
+        payload = dokploy.build_destination_create_payload(dest_def)
+        assert payload["name"] == "s3-backups"
+        assert payload["accessKey"] == "AKIAIOSFODNN7EXAMPLE"
+        assert payload["secretAccessKey"] == "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        assert payload["bucket"] == "my-backups"
+        assert payload["region"] == "us-east-1"
+        assert payload["endpoint"] == "https://s3.amazonaws.com"
+
+    def test_no_extra_fields(self):
+        dest_def = {
+            "name": "s3",
+            "accessKey": "k",
+            "secretAccessKey": "s",
+            "bucket": "b",
+            "region": "r",
+            "endpoint": "e",
+        }
+        payload = dokploy.build_destination_create_payload(dest_def)
+        assert set(payload.keys()) == {"name", "accessKey", "secretAccessKey", "bucket", "region", "endpoint"}
+
+
+class TestBuildDestinationUpdatePayload:
+    def test_includes_destination_id(self):
+        dest_def = {
+            "name": "s3-backups",
+            "accessKey": "k",
+            "secretAccessKey": "s",
+            "bucket": "b",
+            "region": "r",
+            "endpoint": "e",
+        }
+        payload = dokploy.build_destination_update_payload("dest-123", dest_def)
+        assert payload["destinationId"] == "dest-123"
+        assert payload["name"] == "s3-backups"
+
+
+# ---------------------------------------------------------------------------
+# Backup schedule payload tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildBackupCreatePayload:
+    def test_postgres_backup(self):
+        backup_def = {
+            "schedule": "0 0 * * *",
+            "prefix": "daily",
+            "destination": "s3-backups",
+            "enabled": True,
+            "keepLatestCount": 7,
+        }
+        payload = dokploy.build_backup_create_payload(
+            backup_def,
+            db_id="pg-123",
+            db_type="postgres",
+            db_name="mydb",
+            destination_id="dest-456",
+        )
+        assert payload["schedule"] == "0 0 * * *"
+        assert payload["prefix"] == "daily"
+        assert payload["enabled"] is True
+        assert payload["keepLatestCount"] == 7
+        assert payload["destinationId"] == "dest-456"
+        assert payload["databaseType"] == "postgres"
+        assert payload["postgresId"] == "pg-123"
+        assert payload["database"] == "mydb"
+        assert payload["backupType"] == "database"
+
+    def test_mysql_backup(self):
+        backup_def = {
+            "schedule": "0 0 * * 0",
+            "prefix": "weekly",
+            "destination": "s3",
+            "keepLatestCount": 4,
+        }
+        payload = dokploy.build_backup_create_payload(
+            backup_def,
+            db_id="mysql-1",
+            db_type="mysql",
+            db_name="prod",
+            destination_id="dest-1",
+        )
+        assert payload["mysqlId"] == "mysql-1"
+        assert payload["databaseType"] == "mysql"
+        assert payload["enabled"] is True  # default
+
+    def test_defaults(self):
+        backup_def = {
+            "schedule": "0 0 * * *",
+            "prefix": "bk",
+            "destination": "s3",
+        }
+        payload = dokploy.build_backup_create_payload(
+            backup_def,
+            db_id="pg-1",
+            db_type="postgres",
+            db_name="db",
+            destination_id="dest-1",
+        )
+        assert payload["enabled"] is True
+        assert "keepLatestCount" not in payload
+
+
+# ---------------------------------------------------------------------------
+# Backup setup integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestCmdSetupDestinations:
+    def _make_mock_client(self):
+        client = MagicMock()
+
+        def fake_post(endpoint, payload=None):
+            if endpoint == "project.create":
+                return {
+                    "project": {"projectId": "proj-1"},
+                    "environment": {"environmentId": "env-1"},
+                }
+            if endpoint == "application.create":
+                name = (payload or {}).get("name", "app")
+                return {"applicationId": f"app-{name}-id", "appName": f"app-{name}"}
+            if endpoint == "destination.create":
+                return {"destinationId": "dest-new-id"}
+            for db_type in dokploy.DATABASE_TYPES:
+                if endpoint == f"{db_type}.create":
+                    db_name = (payload or {}).get("name", "db")
+                    id_key = dokploy.database_id_key(db_type)
+                    return {id_key: f"{db_type}-{db_name}-id", "appName": f"{db_name}-app"}
+                if endpoint == f"{db_type}.deploy":
+                    return {}
+            if endpoint == "backup.create":
+                return {"backupId": "backup-new-id"}
+            return {}
+
+        client.post = MagicMock(side_effect=fake_post)
+        client.get = MagicMock(return_value=[])
+        return client
+
+    def test_destinations_created_during_setup(self, tmp_path, backup_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, backup_config, state_file)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "destination.create"]
+        assert len(create_calls) == 1
+        assert create_calls[0][0][1]["name"] == "s3-backups"
+
+    def test_destination_state_saved(self, tmp_path, backup_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, backup_config, state_file)
+
+        state = json.loads(state_file.read_text())
+        assert "destinations" in state
+        assert "s3-backups" in state["destinations"]
+        assert state["destinations"]["s3-backups"]["destinationId"] == "dest-new-id"
+
+    def test_existing_destination_reused(self, tmp_path, backup_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+        client.get = MagicMock(
+            side_effect=lambda endpoint, params=None: (
+                [{"destinationId": "dest-existing", "name": "s3-backups"}] if endpoint == "destination.all" else []
+            )
+        )
+
+        dokploy.cmd_setup(client, backup_config, state_file)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "destination.create"]
+        assert len(create_calls) == 0
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "destination.update"]
+        assert len(update_calls) == 1
+
+    def test_backups_created_for_databases(self, tmp_path, backup_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, backup_config, state_file)
+
+        backup_calls = [c for c in client.post.call_args_list if c[0][0] == "backup.create"]
+        assert len(backup_calls) == 1
+        payload = backup_calls[0][0][1]
+        assert payload["schedule"] == "0 0 * * *"
+        assert payload["prefix"] == "daily"
+        assert payload["databaseType"] == "postgres"
+
+    def test_backup_state_saved(self, tmp_path, backup_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, backup_config, state_file)
+
+        state = json.loads(state_file.read_text())
+        assert "backups" in state["database"]["mydb"]
+        assert "daily" in state["database"]["mydb"]["backups"]
+        assert state["database"]["mydb"]["backups"]["daily"]["backupId"] == "backup-new-id"
+
+    def test_no_backups_for_db_without_config(self, tmp_path, backup_config):
+        state_file = tmp_path / ".dokploy-state" / "test.json"
+        client = self._make_mock_client()
+
+        dokploy.cmd_setup(client, backup_config, state_file)
+
+        state = json.loads(state_file.read_text())
+        assert "backups" not in state["database"]["cache"]
+
+
+# ---------------------------------------------------------------------------
+# Backup plan tests
+# ---------------------------------------------------------------------------
+
+
+class TestPlanBackups:
+    def test_initial_setup_includes_destinations(self, backup_config, tmp_path):
+        changes = []
+        dokploy._plan_initial_setup(backup_config, tmp_path, changes)
+
+        dest_changes = [c for c in changes if c["resource_type"] == "destination"]
+        assert len(dest_changes) == 1
+        assert dest_changes[0]["action"] == "create"
+        assert dest_changes[0]["name"] == "s3-backups"
+
+    def test_initial_setup_includes_backups(self, backup_config, tmp_path):
+        changes = []
+        dokploy._plan_initial_setup(backup_config, tmp_path, changes)
+
+        backup_changes = [c for c in changes if c["resource_type"] == "backup"]
+        assert len(backup_changes) == 1
+        assert backup_changes[0]["action"] == "create"
+        assert backup_changes[0]["name"] == "daily"
+        assert backup_changes[0]["parent"] == "mydb"
+        assert backup_changes[0]["attrs"]["schedule"] == "0 0 * * *"
+
+    def test_no_backups_for_db_without_config(self, backup_config, tmp_path):
+        changes = []
+        dokploy._plan_initial_setup(backup_config, tmp_path, changes)
+
+        backup_changes = [c for c in changes if c["resource_type"] == "backup"]
+        parents = [c["parent"] for c in backup_changes]
+        assert "cache" not in parents
+
+
+# ---------------------------------------------------------------------------
+# Backup reconciliation tests
+# ---------------------------------------------------------------------------
+
+
+class TestReconcileDestinations:
+    def test_creates_new_destination(self):
+        client = MagicMock()
+        client.get.return_value = []
+        client.post.return_value = {"destinationId": "dest-new"}
+        cfg = {
+            "destinations": [
+                {
+                    "name": "s3",
+                    "accessKey": "k",
+                    "secretAccessKey": "s",
+                    "bucket": "b",
+                    "region": "r",
+                    "endpoint": "e",
+                }
+            ],
+        }
+        state = {"destinations": {}}
+        state_file = MagicMock()
+
+        dokploy.reconcile_destinations(client, cfg, state, state_file)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "destination.create"]
+        assert len(create_calls) == 1
+
+    def test_updates_existing_destination(self):
+        client = MagicMock()
+        client.get.return_value = [{"destinationId": "dest-1", "name": "s3"}]
+        client.post.return_value = {}
+        cfg = {
+            "destinations": [
+                {
+                    "name": "s3",
+                    "accessKey": "k",
+                    "secretAccessKey": "s",
+                    "bucket": "b",
+                    "region": "r",
+                    "endpoint": "e",
+                }
+            ],
+        }
+        state = {"destinations": {"s3": {"destinationId": "dest-1"}}}
+        state_file = MagicMock()
+
+        dokploy.reconcile_destinations(client, cfg, state, state_file)
+
+        update_calls = [c for c in client.post.call_args_list if c[0][0] == "destination.update"]
+        assert len(update_calls) == 1
+
+    def test_skips_when_no_destinations(self):
+        client = MagicMock()
+        cfg = {}
+        state = {}
+        state_file = MagicMock()
+
+        dokploy.reconcile_destinations(client, cfg, state, state_file)
+
+        client.post.assert_not_called()
+
+
+class TestReconcileDatabaseBackups:
+    def test_creates_new_backup(self):
+        client = MagicMock()
+        client.get.return_value = []
+        client.post.return_value = {"backupId": "bk-1"}
+        cfg = {
+            "database": [
+                {
+                    "name": "mydb",
+                    "type": "postgres",
+                    "databaseName": "myapp",
+                    "databaseUser": "u",
+                    "databasePassword": "p",
+                    "backups": [
+                        {
+                            "schedule": "0 0 * * *",
+                            "prefix": "daily",
+                            "destination": "s3",
+                            "keepLatestCount": 7,
+                        }
+                    ],
+                }
+            ],
+        }
+        state = {
+            "database": {
+                "mydb": {"postgresId": "pg-1", "appName": "mydb-app", "type": "postgres"},
+            },
+            "destinations": {"s3": {"destinationId": "dest-1"}},
+        }
+        state_file = MagicMock()
+
+        dokploy.reconcile_database_backups(client, cfg, state, state_file)
+
+        create_calls = [c for c in client.post.call_args_list if c[0][0] == "backup.create"]
+        assert len(create_calls) == 1
+
+    def test_skips_db_without_backups(self):
+        client = MagicMock()
+        cfg = {
+            "database": [
+                {
+                    "name": "cache",
+                    "type": "redis",
+                    "databasePassword": "p",
+                }
+            ],
+        }
+        state = {
+            "database": {"cache": {"redisId": "r-1", "appName": "cache-app", "type": "redis"}},
+            "destinations": {},
+        }
+        state_file = MagicMock()
+
+        dokploy.reconcile_database_backups(client, cfg, state, state_file)
+
+        client.post.assert_not_called()
