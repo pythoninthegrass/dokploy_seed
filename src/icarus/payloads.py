@@ -186,6 +186,16 @@ def build_port_payload(app_id: str, port: dict) -> dict:
     }
 
 
+def build_redirect_payload(app_id: str, redirect: dict) -> dict:
+    """Build payload for redirects.create."""
+    return {
+        "applicationId": app_id,
+        "regex": redirect["regex"],
+        "replacement": redirect["replacement"],
+        "permanent": redirect["permanent"],
+    }
+
+
 def build_schedule_payload(app_id: str, sched: dict) -> dict:
     """Build payload for schedule.create."""
     payload = {

@@ -6,6 +6,7 @@ from icarus.payloads import (
     DATABASE_DEFAULTS,
     build_mount_payload,
     build_port_payload,
+    build_redirect_payload,
     build_schedule_payload,
     is_compose,
 )
@@ -143,6 +144,21 @@ def _plan_initial_setup(cfg: dict, repo_root: Path, changes: list[dict]) -> None
                         "attrs": {
                             "cronExpression": sched["cronExpression"],
                             "command": sched["command"],
+                        },
+                    }
+                )
+
+            for redir in app_def.get("redirects", []):
+                changes.append(
+                    {
+                        "action": "create",
+                        "resource_type": "redirect",
+                        "name": redir["regex"],
+                        "parent": name,
+                        "attrs": {
+                            "regex": redir["regex"],
+                            "replacement": redir["replacement"],
+                            "permanent": redir["permanent"],
                         },
                     }
                 )
@@ -450,6 +466,60 @@ def _plan_redeploy(
                             "name": f"{pub_port} -> {ex.get('targetPort', '?')}",
                             "parent": name,
                             "attrs": {"publishedPort": pub_port},
+                        }
+                    )
+
+        redirects_cfg = app_def.get("redirects")
+        if redirects_cfg is not None or "redirects" in state["apps"].get(name, {}):
+            remote_redirects = remote.get("redirects") or []
+            desired_redirects = redirects_cfg or []
+            existing_by_regex = {r["regex"]: r for r in remote_redirects}
+            desired_by_regex = {r["regex"]: r for r in desired_redirects}
+
+            for regex, redir in desired_by_regex.items():
+                payload = build_redirect_payload(app_info["applicationId"], redir)
+                if regex in existing_by_regex:
+                    ex = existing_by_regex[regex]
+                    diffs: dict = {}
+                    for key in ("replacement", "permanent"):
+                        old_val = ex.get(key)
+                        new_val = payload.get(key)
+                        if old_val != new_val:
+                            diffs[key] = (old_val, new_val)
+                    if diffs:
+                        changes.append(
+                            {
+                                "action": "update",
+                                "resource_type": "redirect",
+                                "name": regex,
+                                "parent": name,
+                                "attrs": diffs,
+                            }
+                        )
+                else:
+                    changes.append(
+                        {
+                            "action": "create",
+                            "resource_type": "redirect",
+                            "name": regex,
+                            "parent": name,
+                            "attrs": {
+                                "regex": regex,
+                                "replacement": redir["replacement"],
+                                "permanent": redir["permanent"],
+                            },
+                        }
+                    )
+
+            for regex, ex in existing_by_regex.items():
+                if regex not in desired_by_regex:
+                    changes.append(
+                        {
+                            "action": "destroy",
+                            "resource_type": "redirect",
+                            "name": regex,
+                            "parent": name,
+                            "attrs": {"regex": regex},
                         }
                     )
 

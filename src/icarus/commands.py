@@ -21,6 +21,7 @@ from icarus.payloads import (
     build_github_provider_payload,
     build_mount_payload,
     build_port_payload,
+    build_redirect_payload,
     build_schedule_payload,
     database_endpoint,
     database_id_key,
@@ -33,6 +34,7 @@ from icarus.reconcile import (
     reconcile_app_domains,
     reconcile_app_mounts,
     reconcile_app_ports,
+    reconcile_app_redirects,
     reconcile_app_schedules,
     reconcile_app_settings,
 )
@@ -376,7 +378,23 @@ def cmd_setup(client: DokployClient, cfg: dict, state_file: Path, repo_root: Pat
             resp = client.post("schedule.create", sched_payload)
             state["apps"][name]["schedules"][sched["name"]] = {"scheduleId": resp["scheduleId"]}
 
-    # 11. Databases
+    # 11. Redirects
+    for app_def in cfg["apps"]:
+        if is_compose(app_def):
+            continue
+        redirects = app_def.get("redirects")
+        if not redirects:
+            continue
+        name = app_def["name"]
+        app_id = state["apps"][name]["applicationId"]
+        state["apps"][name]["redirects"] = {}
+        for redir in redirects:
+            print(f"Creating redirect for {name}: {redir['regex']}...")
+            redir_payload = build_redirect_payload(app_id, redir)
+            resp = client.post("redirects.create", redir_payload)
+            state["apps"][name]["redirects"][redir["regex"]] = {"redirectId": resp["redirectId"]}
+
+    # 12. Databases
     for db_def in cfg.get("database", []):
         name = db_def["name"]
         db_type = db_def["type"]
@@ -550,6 +568,7 @@ def cmd_apply(
         reconcile_app_schedules(client, cfg, load_state(state_file), state_file)
         reconcile_app_mounts(client, cfg, load_state(state_file), state_file)
         reconcile_app_ports(client, cfg, load_state(state_file), state_file)
+        reconcile_app_redirects(client, cfg, load_state(state_file), state_file)
         reconcile_app_settings(client, cfg, load_state(state_file))
 
     print("\n==> Phase 4/4: trigger")
