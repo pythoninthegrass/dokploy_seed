@@ -1,9 +1,10 @@
 ---
 id: TASK-025
 title: Add backup and destination management
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-03-23 18:05'
+updated_date: '2026-03-25 18:03'
 labels:
   - gap-analysis
   - new-resource
@@ -14,7 +15,7 @@ references:
   - main.py
   - schemas/dokploy.schema.json
 priority: medium
-ordinal: 10000
+ordinal: 2000
 ---
 
 ## Description

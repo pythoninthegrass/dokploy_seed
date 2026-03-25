@@ -1,9 +1,10 @@
 ---
 id: TASK-022
 title: Add basic auth / security support
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-03-23 18:05'
+updated_date: '2026-03-25 18:03'
 labels:
   - gap-analysis
   - new-resource
@@ -13,7 +14,7 @@ references:
   - main.py
   - schemas/dokploy.schema.json
 priority: medium
-ordinal: 7000
+ordinal: 1000
 ---
 
 ## Description

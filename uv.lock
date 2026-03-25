@@ -2,6 +2,9 @@ version = 1
 revision = 3
 requires-python = "==3.13.*"
 
+[options]
+prerelease-mode = "allow"
+
 [[package]]
 name = "anyio"
 version = "4.13.0"
@@ -342,6 +345,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "pyclean" },
     { name = "ruff" },
 ]
 test = [
@@ -362,6 +366,7 @@ requires-dist = [
     { name = "docker", extras = ["ssh"], specifier = ">=7.0" },
     { name = "httpx", specifier = ">=0.28.1,<1" },
     { name = "hypothesis", extras = ["cli"], marker = "extra == 'test'", specifier = ">=6.112.1,<7.0.0" },
+    { name = "pyclean", marker = "extra == 'dev'", specifier = ">=3.5.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3.3,<9.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.24.0,<1.0.0" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=6.1.1" },
@@ -481,6 +486,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412, upload-time = "2025-05-15T12:30:07.975Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
+]
+
+[[package]]
+name = "pyclean"
+version = "3.5.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/75/56/d90b195c172b7fb993274d27cd546604855849557eb0b0074e621f8e8610/pyclean-3.5.0.tar.gz", hash = "sha256:6033b7cb728fbdacc5912dc72e09baee76aeef328430f3e9ccb1a78def4fbfd4", size = 26594, upload-time = "2026-01-10T17:03:27.482Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9f/60/e8aed49c01666b0dd1b7097855792bcd0ff65c35096977b4034737cdc91c/pyclean-3.5.0-py3-none-any.whl", hash = "sha256:584801fecd52a7690ba85a141c21ecfbbfb69bcfcd03b2b1b87f5e0d8c7a7c29", size = 27142, upload-time = "2026-01-10T17:03:25.93Z" },
 ]
 
 [[package]]
