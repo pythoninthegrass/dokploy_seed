@@ -1,14 +1,16 @@
 """Unit tests for pure functions in main.py."""
 
 import argparse
+import httpx
 import icarus as dokploy
 import json
 import pytest
+import respx
 import sys
 import yaml
 from icarus import commands as icarus_commands, ssh as icarus_ssh
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 pytestmark = pytest.mark.unit
 
@@ -4788,3 +4790,125 @@ class TestPlanRedirects:
 
         redirect_changes = [c for c in changes if c["resource_type"] == "redirect"]
         assert len(redirect_changes) == 0
+
+
+# ---------------------------------------------------------------------------
+# DokployClient retry with exponential backoff
+# ---------------------------------------------------------------------------
+
+BASE_URL = "https://dokploy.test"
+API_KEY = "test-key"
+
+
+def _make_retry_client(router: respx.Router, max_retries: int = 3) -> dokploy.DokployClient:
+    """Create a DokployClient with mocked transport for retry tests."""
+    client = dokploy.DokployClient(BASE_URL, API_KEY, max_retries=max_retries)
+    mock_transport = httpx.MockTransport(router.handler)
+    client.client = httpx.Client(
+        transport=mock_transport,
+        base_url=BASE_URL,
+        headers={"x-api-key": API_KEY},
+        timeout=60.0,
+    )
+    return client
+
+
+class TestRetryOnTransientErrors:
+    def test_retry_on_429(self):
+        """429 responses are retried up to max_retries times."""
+        router = respx.Router()
+        route = router.get("/api/project.all").mock(
+            side_effect=[
+                httpx.Response(429),
+                httpx.Response(429),
+                httpx.Response(200, json=[{"id": 1}]),
+            ]
+        )
+        client = _make_retry_client(router)
+        with patch("icarus.client.time.sleep"):
+            result = client.get("project.all")
+        assert result == [{"id": 1}]
+        assert route.call_count == 3
+
+    def test_retry_on_500(self):
+        """5xx responses are retried."""
+        router = respx.Router()
+        route = router.get("/api/project.all").mock(
+            side_effect=[
+                httpx.Response(500),
+                httpx.Response(502),
+                httpx.Response(200, json={"ok": True}),
+            ]
+        )
+        client = _make_retry_client(router)
+        with patch("icarus.client.time.sleep"):
+            result = client.get("project.all")
+        assert result == {"ok": True}
+        assert route.call_count == 3
+
+    def test_no_retry_on_400(self):
+        """400 Bad Request fails immediately without retry."""
+        router = respx.Router()
+        route = router.post("/api/application.create").mock(return_value=httpx.Response(400, json={"error": "bad request"}))
+        client = _make_retry_client(router)
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            client.post("application.create", {"name": "test"})
+        assert exc_info.value.response.status_code == 400
+        assert route.call_count == 1
+
+    def test_no_retry_on_404(self):
+        """404 Not Found fails immediately without retry."""
+        router = respx.Router()
+        route = router.get("/api/application.one").mock(return_value=httpx.Response(404))
+        client = _make_retry_client(router)
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            client.get("application.one")
+        assert exc_info.value.response.status_code == 404
+        assert route.call_count == 1
+
+    def test_exponential_backoff_timing(self):
+        """Sleep durations follow exponential backoff: 1s, 2s, 4s."""
+        router = respx.Router()
+        router.get("/api/project.all").mock(
+            side_effect=[
+                httpx.Response(503),
+                httpx.Response(503),
+                httpx.Response(200, json=[]),
+            ]
+        )
+        client = _make_retry_client(router)
+        with patch("icarus.client.time.sleep") as mock_sleep:
+            client.get("project.all")
+        assert mock_sleep.call_args_list == [call(1), call(2)]
+
+    def test_max_retries_exhausted(self):
+        """Raises after max_retries+1 total attempts."""
+        router = respx.Router()
+        route = router.get("/api/project.all").mock(return_value=httpx.Response(500))
+        client = _make_retry_client(router, max_retries=3)
+        with patch("icarus.client.time.sleep"):
+            with pytest.raises(httpx.HTTPStatusError) as exc_info:
+                client.get("project.all")
+        assert exc_info.value.response.status_code == 500
+        assert route.call_count == 4  # 1 initial + 3 retries
+
+    def test_configurable_max_retries(self):
+        """max_retries=1 allows only 1 retry (2 total attempts)."""
+        router = respx.Router()
+        route = router.get("/api/project.all").mock(return_value=httpx.Response(500))
+        client = _make_retry_client(router, max_retries=1)
+        with patch("icarus.client.time.sleep"):
+            with pytest.raises(httpx.HTTPStatusError):
+                client.get("project.all")
+        assert route.call_count == 2
+
+    def test_success_no_retry(self):
+        """Successful responses return immediately without sleeping."""
+        router = respx.Router()
+        route = router.get("/api/project.all").mock(return_value=httpx.Response(200, json=[]))
+        client = _make_retry_client(router)
+        with patch("icarus.client.time.sleep") as mock_sleep:
+            result = client.get("project.all")
+        assert result == []
+        assert route.call_count == 1
+        mock_sleep.assert_not_called()
